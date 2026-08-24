@@ -1,0 +1,289 @@
+---
+title: "Introduction to Spatial Vector Data in R"
+output: 
+  learnr::tutorial:
+    progressive: true
+runtime: shiny_prerendered
+---
+
+```{r setup, include=FALSE}
+library(learnr)
+library(sf)
+library(dplyr)
+library(ggplot2)
+knitr::opts_chunk$set(echo = FALSE)
+gradethis::gradethis_setup()
+tutorial_options(exercise.completion = FALSE)
+```
+
+## Introduction to Spatial Vector Data in R
+
+The goal of this tutorial is to teach basic methods for working with vector data in R. In addition to demonstrating how to manipulate spatial data objects, the tutorial demonstrates reading and writing spatial vector data. Most spatial vector data processing is handled using the `sf` package and that is the focus of this tutorial.
+
+### Exercise 1 - Create some data
+
+Let's start by creating some point (x, y) data using two individual numerical objects named *longitude* (the x-coordinate) and *latitude* (the y-coordinate). We'll then combine these two objects into a single matrix called *lonlat*.
+
+```{r point-data, exercise=TRUE, exercise.lines = 15, exercise.eval = T}
+# set random number seed
+set.seed(809)
+
+# longitude object
+longitude <- runif(n=10, min=-120, max=-115)
+
+# latitude object
+latitude <- runif(n=10, min=35, max=45)
+
+# combine longitude and latitude into a matrix
+lonlat <- cbind(longitude, latitude)
+
+# print the result
+print(lonlat)
+```
+
+Let's answer a few questions about the previous block of code.
+
+```{r random-number-generation, echo=F}
+quiz(
+  question("What does `set.seed(809)` do?",
+    answer("I have no idea."),
+    answer("Plants a tree somewhere to fight climate change."),
+    answer("Ensures that the sequence of random numbers generated is the same every time the code is run.", correct = TRUE),
+    allow_retry = TRUE),
+  question("What does `runif()` do?",
+    answer("Runs the line of code if a certain condition is met, i.e., runs - if"),
+    answer("Generates random numbers from a uniform distribution.", correct = TRUE),
+    answer("I have no idea."),
+    allow_retry = TRUE))
+```
+
+#### **Write R code to perform the following tasks:** 
+
+1. Print the first few rows of `lonlat`.
+2. Print what `class` the `lonlat` object is. 
+3. Make a scatter plot of the x-y coordinates in `lonlat`. 
+
+```{r exercise1, exercise = TRUE, exercise.lines = 5, exercise.setup = "point-data"}
+
+```
+
+```{r exercise1-solution}
+head(lonlat) # or lonlat[1:5,]
+class(lonlat)
+plot(lonlat)
+```
+ 
+```{r exercise1-code-check}
+grade_code()
+```
+
+### Exercise 2 - Make `lonlat` into a spatial object
+
+Note that the object we just created is of `class::matrix, array` - neither of which is a *spatial data class*. We can convert the `lonlat` object into a spatial data class using the `st_as_sf` function from the `sf` package - **but** we first need to convert `lonlat` into a data frame.
+
+The `sf` package provides classes for geographic vector data. See Chapter 2 of the [Geocomputation with R](https://geocompr.robinlovelace.net/) (https://geocompr.robinlovelace.net/) book for more details. 
+
+```{r sf-library, exercise=TRUE, exercise.lines = 10, exercise.eval = T, echo=T, message=T}
+# load sf
+library(sf)
+
+# run these outside of this tutorial
+# what vignettes are available?
+#vignette(package="sf")
+
+# introduction to sf
+#vignette("sf1")
+```
+
+```{r spatial-object, exercise=TRUE, exercise.lines = 10, exercise.eval = T, exercise.setup = "point-data"}
+# convert lonlat to data frame
+lonlat.df <- as.data.frame(lonlat)
+
+# convert lonlat.df to spatial object
+lonlat.sf <- sf::st_as_sf(lonlat.df, coords = c("longitude", "latitude"))
+
+# print the result
+print(lonlat.sf)
+```
+
+Some things to note about `lonlat.sf`:  
+
+* It now has *geometry* and a *geometry type*
+* It has slot for a *CRS* (coordinate reference system) - in this case, it is NA because we haven't defined it yet.
+* It has a *bbox* (bounding box) - the spatial extent of the object.
+* It does not have any data columns associated with it (0 fields).
+
+#### **Write R code to perform the following tasks:**  
+
+1. Print the first few rows of `lonlat.sf`.
+2. Print what `class` the `lonlat.sf` object is. 
+3. Make a plot of `lonlat.sf`. 
+
+```{r exercise2, exercise = TRUE, exercise.lines = 10, exercise.setup = "spatial-object"}
+
+```
+
+```{r exercise2-solution}
+head(lonlat.sf) # or lonlat.sf[1:5,]
+class(lonlat.sf)
+plot(lonlat.sf)
+```
+ 
+```{r exercise2-code-check}
+grade_code()
+```
+
+Note that the plot of `lonlat.sf` does not have axes.
+
+```{r remove-coords-quiz, echo=F}
+quiz(
+  question("What happened to the `longitude` and `latitude` columns after converting `lonlat.df` to `lonlat.sf` with `st_as_sf()`?",
+    answer("They are still present as regular data columns."),
+    answer("They were combined into the `geometry` column and removed as separate columns (the default `remove = TRUE`).", correct = TRUE),
+    answer("They were renamed to `x` and `y`."),
+    allow_retry = TRUE))
+```
+
+### Exercise 3 - Define the CRS (Coordinate Reference System)
+
+We will cover the details of **C**oordinate **R**eference **S**ystems (CRS) in [another tutorial](https://fitzlab.shinyapps.io/CRS-and-Spatial-Transformation/), but for now, let's just define the CRS for the `lonlat.sf` object. Most of the time, spatial data will come with the CRS already defined, but not always. Or, you may created a spatial object from a spreadsheet and will need to define the CRS. Either way, you need to be diligent about understanding and checking the CRS of your data. **NOTE:** *Defining* the CRS is different from *transforming* the data to a different CRS! Defining the CRS is telling `R` what the CRS is, while transforming the data alters calculates the spatial coordinates defining the positions of the object to new coordinates. More on this later too. 
+
+There are two main ways to describe a CRS in `R`: (1) an `EPSG` code or a `proj4string`. An `EPSG` code is shorter and therefore easier to remember, and refers to exactly one particular, CRS with defined attributes. In contrast, a `proj4string` allows you more flexibility when it comes to specifying different parameters such as the projection type, the datum, and the ellipsoid, allowing one to control many different projections and modify existing ones - which also makes the `proj4string` much more complicated. 
+
+We will use the `st_crs` function to define the CRS as EPSG:4326. See [EPSG:4326](https://epsg.io/4326) (https://epsg.io/4326) for details. 
+
+```{r crs-1, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "spatial-object"}
+# get attributes of the CRS
+sf::st_crs("EPSG:4326")
+```
+
+```{r crs-2, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "spatial-object"}
+# assign the CRS for lonlat.sf
+sf::st_crs(lonlat.sf) <- 4326
+
+# print the result
+print(lonlat.sf)
+```
+
+```{r crs-quiz, echo=F}
+quiz(
+  question("What has changed about the `lonlat.sf` object after defining the CRS?",
+    answer("Nothing."),
+    answer("The `CRS` is now defined as `EPSG:4326`, which refers to WGS84.", correct = TRUE),
+    answer("It now has data columns associated with it."),
+    allow_retry = TRUE))
+```
+    
+### Exercise 4 - Adding attribute data to spatial objects
+
+We can add attribute data to spatial objects by creating a data frame and then joining it to a spatial object. The `sf` data class is very flexible, allowing you to interact with attribute data like you would any other data frame.
+
+Let's create a data frame called `climate` with two columns: `temperature` and `precip`. We will then join this data frame to the `lonlat.sf` object.
+
+```{r attribute-data, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "spatial-object"}
+# create the data frame
+climate <- data.frame(temperature = rnorm(n=10, mean=25, sd=5), precip = runif(10, min=0, max=500))
+
+# join the climate data to lonlat.sf
+climatePts <- lonlat.sf %>%
+  dplyr::mutate(climate)
+
+# print the result
+print(climatePts)
+```
+
+Now, let's plot the `climatePts` object using `ggplot2`. We will use the `temperature` attribute to color the points and the `precip` attribute to size the points.
+
+```{r ggplot-of-climatePts, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "attribute-data"}
+# ggplot2
+library(ggplot2)
+
+# plot the result - use geom_sf() since climatePts is an sf object
+ggplot(climatePts) +
+  geom_sf(aes(color = temperature, size = precip)) +
+  scale_color_viridis_c() +
+  scale_size_continuous(range = c(1, 10)) +
+  theme_minimal()
+```
+
+### Exercise 5 - Create a polygon geometry
+
+The `sf` data class can represents 7 core geometry types (but not any raster data classes!): points, lines, polygons and their respective ‘multi’ versions, which group together features of the same type into a single feature. `sf` also supports geometry collections, which can contain multiple geometry types in a single object.
+
+Here, we create a polygon geometry using the `st_polygon` function. We then convert the polygon geometry to an `sf` object using the `st_sf` function.
+
+
+```{r polygon-geometry, exercise=TRUE, exercise.lines = 20, exercise.eval = T}
+# Define coordinates for the vertices of a polygon
+# Note that the polygon must be closed by repeating the first point at the end
+x <- c(0, 2, 5, 8, 9, -5, -3, 0)
+y <- c(0, 3, 7, 8, 11, 3, 1, 0)
+
+# Combine the x and y coordinates into a matrix
+coords <-cbind(x, y)
+
+# Create a polygon geometry
+poly_geom <- sf::st_polygon(list(coords))
+
+# Convert to an sf object
+poly.sf <- sf::st_sf(geometry = st_sfc(poly_geom))
+
+# Print the result
+print(poly.sf)
+#
+# Plot the result
+plot(poly.sf)
+```
+
+```{r polygon-closed-quiz, echo=F}
+quiz(
+  question("Why must the first and last coordinate pairs in `x` and `y` be identical when defining a polygon with `st_polygon()`?",
+    answer("They don't need to match; `sf` closes the ring automatically."),
+    answer("A polygon geometry must form a closed ring - the boundary has to start and end at the same point.", correct = TRUE),
+    answer("It's only required for `multipolygon` geometries, not simple polygons."),
+    allow_retry = TRUE))
+```
+
+### Exercise 6 - Reading / writing vector shapefiles.
+
+While it is possible to create spatial vector data from scratch, which you may have to do if you are given a spreadsheet with coordinates, it is more common to read in spatial data from an existing shapefile (`*.shp`). Here we will load an example file provided with the `sf` package.  
+
+```{r read-shapefile, exercise=TRUE, exercise.eval = T}
+# read the shapefile using st_read
+nc <- sf::st_read(dsn = "data/nc.shp")
+
+# print nc
+print(nc)
+```
+
+Let's plot `nc` and make a map of the `AREA` attribute.
+
+```{r ggplot-of-nc, exercise=TRUE, exercise.eval = T, exercise.lines = 6, exercise.setup = "read-shapefile"}
+ggplot(nc) +
+  geom_sf(aes(fill = AREA)) +
+  theme_minimal()
+```
+
+Now let's extract a subset of the data based on the `AREA` attribute and save a new shapefile.
+
+```{r subset-nc, exercise=TRUE, exercise.eval = T, exercise.setup = "read-shapefile"}
+# extract the AREA column
+nc.area <- nc %>% 
+  dplyr::select(AREA)
+
+# print the result
+print(nc.area)
+
+# save the subset as a new shapefile
+# written to tempdir() since the app directory is read-only once deployed to shinyapps.io
+sf::st_write(nc.area, file.path(tempdir(), "nc_area.shp"), delete_layer=T)
+```
+
+```{r crs-missing-quiz, echo=F}
+quiz(
+  question("If you read in a shapefile that is missing its `.prj` file, what would `st_crs(nc)` most likely return?",
+    answer("An error - `sf` requires a `.prj` file to read a shapefile."),
+    answer("`NA` - the CRS is undefined, even though the coordinates themselves are still readable.", correct = TRUE),
+    answer("It automatically assumes WGS84 (EPSG:4326)."),
+    allow_retry = TRUE))
+```

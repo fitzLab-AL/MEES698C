@@ -1,0 +1,46 @@
+---
+title: "Breakout Activity - Debug: Stacking Mismatched Rasters"
+output: html_document
+---
+
+## Breakout Activity - Debug: Stacking Mismatched Rasters (Introduction to Raster Data in R)
+
+**Groups of 3-4. 5-8 minutes, then brief share-out.**
+
+A colleague has `myRast` from Exercise 1 of the tutorial, and a second raster covering the same
+geographic area but pulled from a different data source. They try to stack the two rasters
+together and the code below throws an error. Work through it as a group, diagnose the error, and
+fix it.
+
+```{r stack-mismatch-setup}
+# recreates the objects from Exercise 1 of the Introduction to Rasters tutorial, so this chunk runs standalone
+library(terra)
+
+# myRast, as created in Exercise 1: 10 rows x 10 cols over the same extent used throughout the tutorial
+myRast <- terra::rast(ncol = 10, nrow = 10, xmax = -80, xmin = -150, ymin = 20, ymax = 60)
+values(myRast) <- 1:ncell(myRast)
+
+# a second raster of the same region, from a different source at a coarser resolution
+myRast_other_source <- terra::rast(ncol = 8, nrow = 8, xmax = -80, xmin = -150, ymin = 20, ymax = 60)
+values(myRast_other_source) <- 1:ncell(myRast_other_source)
+```
+
+```{r broken-stack, error=TRUE}
+# stack the two rasters together
+rrr <- c(myRast, myRast_other_source)
+rrr
+```
+
+### Discussion questions
+
+1. What error do you get when you run the `broken-stack` chunk?
+2. Print `myRast` and `myRast_other_source` (just type the object name). What's different about
+   them, and why does that explain the error? (Hint: re-read the paragraph introducing Exercise 3
+   in the tutorial — what does it say a set of rasters needs in common to be stackable?)
+3. `myRast` and `myRast_other_source` cover the exact same spatial extent. Does that mean they
+   have the same resolution? Why or why not?
+4. Fix the code so the two rasters can be stacked. (Hint: look at `terra::resample()` or
+   `terra::project()` with a template raster — which one should be resampled to match the other,
+   and does it matter which direction you go?)
+
+**Report back in the shared doc:** your fixed code, plus a one-sentence explanation of the bug.

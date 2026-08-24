@@ -1,0 +1,60 @@
+---
+title: "Breakout Activity - Debug Exercise 4"
+output: html_document
+---
+
+## Breakout Activity - Debug Exercise 4 (Introduction to Spatial Vector Data)
+
+**Groups of 3-4. 5-8 minutes, then brief share-out.**
+
+The code below is the *original* version of the Exercise 4 plotting chunk from the
+Introduction to Spatial Vector Data tutorial. It does not run as written. Work through it as a
+group, diagnose the error, and fix it.
+
+```{r climate-setup}
+# recreates the objects from Exercises 1-4 of the tutorial, so this chunk runs standalone
+library(sf)
+library(dplyr)
+
+set.seed(809)
+
+# longitude and latitude objects
+longitude <- runif(n=10, min=-120, max=-115)
+latitude <- runif(n=10, min=35, max=45)
+
+# combine into a matrix, then a data frame
+lonlat <- cbind(longitude, latitude)
+lonlat.df <- as.data.frame(lonlat)
+
+# convert to a spatial object
+lonlat.sf <- sf::st_as_sf(lonlat.df, coords = c("longitude", "latitude"))
+sf::st_crs(lonlat.sf) <- 4326
+
+# create the climate data frame and join it to lonlat.sf
+climate <- data.frame(temperature = rnorm(n=10, mean=25, sd=5), precip = runif(10, min=0, max=500))
+climatePts <- lonlat.sf %>%
+  dplyr::mutate(climate)
+```
+
+```{r broken-plot, error=TRUE}
+# ggplot2
+library(ggplot2)
+
+# plot the result
+ggplot(climatePts) +
+  geom_point(aes(x = longitude, y = latitude, color = temperature, size = precip)) +
+  scale_color_viridis_c() +
+  scale_size_continuous(range = c(1, 10)) +
+  theme_minimal()
+```
+
+### Discussion questions
+
+1. What error do you get when you run the `broken-plot` chunk?
+2. Look back at how `lonlat.sf` was created. What happened to the `longitude` and `latitude`
+   columns, and why does that explain the error?
+3. Fix the code so it plots correctly. (Hint: `climatePts` is an `sf` object.)
+4. Bonus: even if `longitude` and `latitude` still existed as columns, why would
+   `geom_point(aes(x = , y = ))` still be the wrong tool for plotting an `sf` object?
+
+**Report back in the shared doc:** your fixed code, plus a one-sentence explanation of the bug.

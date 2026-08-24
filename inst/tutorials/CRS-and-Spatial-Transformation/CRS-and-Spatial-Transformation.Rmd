@@ -1,0 +1,310 @@
+---
+title: "Coordinate Reference Systems and Spatial Transformation"
+output: 
+  learnr::tutorial:
+    progressive: true
+runtime: shiny_prerendered
+---
+
+```{r setup, include=FALSE}
+library(learnr)
+library(sf)
+library(dplyr)
+library(terra)
+library(tmap)
+library(rnaturalearth)
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+## Coordinate Reference Systems and Spatial Transformation
+
+Spatial vector and raster data differ in their data structures and other attributes, but they share a common feature: they are both defined in a coordinate reference system (CRS) that describes how the spatial attributes of the data relate to the surface of the Earth. A CRS is a standardized way of describing the location of spatial data in a two- or three-dimensional space. CRSs are either *geographic* or *projected*. 
+
+Geographic CRSs are based on a 3-dimensional spherical or ellipsoidal model of the Earth using two angular coordinates (latitude [north-south] and longitude [east-west]). Note that distances in geographic CRSs are measured in degrees **NOT** meters. Projected CRSs, on the other hand, are based on a flat, 2-dimensional Cartesian coordinate system. Distances in projected CRSs are measured in meters or feet. The CRS includes information about the coordinate system (e.g., Cartesian or spherical), the datum (e.g., WGS84), and the projection (e.g., UTM). Spatial data can be *transformed* or *projected* from geographic to projected CRSs and vice versa. 
+
+A few critical points:
+
+1. When performing spatial analyses, it is essential to know the CRS of the data and to answer a few basic questions: Do all datasets involved have the same CRS? Is the CRS a geographic or projected system? Which CRS is most appropriate for the analyses and why? (see this [Section of Geocomputation in R](https://r.geocompx.org/reproj-geo-data#which-crs) (https://r.geocompx.org/reproj-geo-data#which-crs) for some advice).
+2. When working with multiple spatial datasets, it is crucial to ensure that they are in the same CRS - otherwise they will not map to the same region of the Earth.
+3. When transforming spatial data from one CRS to another, it is essential to understand the implications of the transformation on the data, which will add distortion in terms of area, direction, distance, and shape. As we demonstrate below, transforming rasters will also affect the cell values themselves.
+4. When faced with the choice to transform vector or raster data, it is generally better to transform the vector data to the CRS of the raster data than vice versa.
+
+### Exercise 1 - The difference between Geographic and Projected CRSs
+
+In this first exercise, we will demonstrate the difference between Geographic and Projected CRSs using the `sf` package in `R`. We will create a simple x-y point in the city of London and transform it from a Geographic CRS to a Projected CRS. We will then perform a spatial buffering around the point in each CRS and compare.
+
+```{r define-crs-1, exercise=TRUE, exercise.lines = 10, exercise.eval = T}
+# create a simple point in London
+london <- data.frame(lon = -0.1, lat = 51.5) %>% 
+  sf::st_as_sf(coords = c("lon", "lat"))
+
+# check the CRS of the point
+sf::st_crs(london)
+
+# check if the CRS is long-lat (geographic) or projected
+sf::st_is_longlat(london)
+```
+
+```{r quiz-crs, echo=F}
+quiz(
+  question("Is the CRS of `london` geographic or projected?",
+    answer("Geographic"),
+    answer("Projected"),
+    answer("Trick question. It is neither becuase we have not defined it.", correct=TRUE),
+    allow_retry = TRUE))
+```
+
+The two main ways to describe CRSs in `R` are either an `EPSG` code or a `proj4string` text definition. The `EPSG` code is a standardized code that indicates the the CRS. The `proj4string` is a character string that also indicates the CRS, but provides numerous details about the CRS in a specific format.  
+
+```{r define-crs-2, exercise=TRUE, exercise.lines = 8, exercise.setup="define-crs-1", exercise.eval = T}
+# set the CRS of the London point to WGS84 (EPSG code = 4326)
+london_geo <- sf::st_set_crs(london, value=4326)
+
+# check if the CRS is longlat
+sf::st_is_longlat(london_geo)
+
+# check the CRS of the point
+sf::st_crs(london_geo)
+```
+
+Next, let's `transform` or `project` the point from WGS84, a Geographic CRS, to a projected CRS. Here we will use the [British National Grid](https://epsg.io/27700), `EPSG code = 27700`. For demonstration, we perform the same action using the `proj4string` version of the CRS, which I copied (and modified slightly) from the website linked above.
+
+The `sf` package function `st_transform` is used to transform the CRS of the object, which recalculates the coordinates of every vertex of the object to the new CRS. Here we are projecting a single point, but this function applies to all spatial vector objects.
+
+**Note that** *setting* **the CRS of an object does not change the coordinates of the object. It only changes the CRS metadata of the object. To change the coordinates, you must project the data using the `sf::st_transform` function.**
+
+```{r transform-london, exercise=TRUE, exercise.lines = 8, exercise.setup="define-crs-2", exercise.eval = T}
+# project from WGS84 to British National Grid
+london_proj <- sf::st_transform(london_geo, crs = 27700)
+
+# here is the same result, but using the proj4string
+london_proj_proj4 <- sf::st_transform(london_geo, crs = "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs +type=crs")
+```
+
+Let's quickly look at the details fo the CRS of each of the objects we just created by projecting `london_geo`.
+
+```{r london-proj-epsg, exercise=TRUE, exercise.lines = 6, exercise.setup="transform-london", exercise.eval = T}
+# print the object
+print(london_proj)
+#
+# print the CRS of the object
+sf::st_crs(london_proj)
+```
+
+```{r london-proj-proj4, exercise=TRUE, exercise.lines = 6, exercise.setup="transform-london", exercise.eval = T}
+# print the object
+print(london_proj_proj4)
+#
+# print the CRS of the object
+sf::st_crs(london_proj_proj4)
+```
+
+At last, we get to a demonstration of the difference between Geographic and Projected CRSs and why it is important to understand their behavior. We will buffer the point by 1 degree in the Geographic CRS and 100,000 meters in the Projected CRS.
+
+```{r buffer-london, exercise=TRUE, exercise.lines = 15, exercise.setup="transform-london", exercise.eval = T}
+# buffer the point by 1 degree
+london_buff_lonlat <- sf::st_buffer(london_geo, dist = 1)
+
+# buffer the point by 100,000 meters
+london_buff_proj <- sf::st_buffer(london_proj, dist = 1e5)
+```
+
+Before you look at the maps below, make a prediction.
+
+```{r quiz-buffer-shape, echo=F}
+quiz(
+  question("Which buffer do you expect to be closer to a true circle, equidistant from London at every point along its edge?",
+    answer("The buffer made in the Geographic CRS (`london_buff_lonlat`)"),
+    answer("The buffer made in the Projected CRS (`london_buff_proj`)", correct = TRUE),
+    answer("Both will be equally accurate circles"),
+    allow_retry = TRUE),
+  question("Why?",
+    answer("Because meters are inherently more precise than degrees"),
+    answer("Because a degree of longitude covers a different real-world distance than a degree of latitude, and that distance changes with latitude too", correct = TRUE),
+    answer("Because `st_buffer()` only works correctly on projected data"),
+    allow_retry = TRUE))
+```
+
+The two buffers are shown below. The panel on the left shows the buffer in the Projected CRS, and the panel on the right shows the buffer in the Geographic CRS.
+
+Note that the buffer based on a Geographic CRS is not a circle, but rather a polygon that approximates a circle on the surface of the Earth. The buffer based on a Projected CRS is a true circle equidistant to London. This is a critical difference to understand when working with spatial data.
+
+```{r crs-buf-old, echo=F, message=FALSE}
+# Recreated from scratch rather than reusing exercise objects: exercise chunks
+# run in an isolated per-user session, so london_geo/london_proj/london_buff_proj
+# from earlier exercises aren't available in this regular (prerendered) chunk.
+london <- data.frame(lon = -0.1, lat = 51.5) %>%
+  sf::st_as_sf(coords = c("lon", "lat"))
+london_geo <- sf::st_set_crs(london, value = 4326)
+london_proj <- sf::st_transform(london_geo, crs = 27700)
+london_buff_proj <- sf::st_buffer(london_proj, dist = 1e5)
+
+london_buff_s2_100_cells <- st_buffer(london_geo, dist = 1e5, max_cells = 100)
+
+sf::sf_use_s2(FALSE)
+london_buff_lonlat2 <- st_buffer(london_geo, dist = 1) # incorrect result
+sf::sf_use_s2(TRUE)
+
+#uk <- rnaturalearth::ne_countries(scale = 50)
+#uk <- subset(uk, name_long == "United Kingdom")
+
+uk <- st_read("data/uk.shp", quiet = TRUE)
+
+tm2 <- tm_shape(london_buff_proj, bbox = st_bbox(london_buff_s2_100_cells)) + 
+  tm_grid(lwd = 0.2) +
+  tm_borders(col = "black", lwd = 0.5) + 
+  tm_shape(uk) +
+  tm_polygons(lty = 3, alpha = 0.2, col = "#567D46") +
+  tm_shape(london_proj) +
+  tm_symbols()
+
+tm3 <- tm_shape(london_buff_lonlat2, bbox = st_bbox(london_buff_s2_100_cells)) + 
+  tm_graticules(lwd = 0.2) +
+  tm_borders(col = "black", lwd = 0.5) + 
+  tm_shape(uk) +
+  tm_polygons(lty = 3, alpha = 0.2, col = "#567D46") +
+  tm_shape(london_proj) +
+  tm_symbols()
+
+tmap_arrange(tm2, tm3, nrow = 1)
+```
+
+### Exercise 2 - Transforming Raster Data
+
+Just like spatial vector data, raster data can also be transformed from one CRS to another. To do so we use the `project` function from the `terra` package. But first, a critical point: the transformation of raster data is more complex than vector data because it involves the *transformation of the cell values themselves*. A new raster object is created with a different number of columns, rows, and cells from the original raster - *and the data values in the raster cells are re-calculated* adding error and reducing precision. For this reason, when working with a spatial vector data set and a raster data set in different projections, *it is better to transform the vector data to the CRS of the raster data than vice versa*. That's not always an option however. 
+
+Let's create a simple raster and transform it from a Geographic CRS to a Projected CRS.
+
+```{r raster-transform, exercise=TRUE, exercise.lines = 15, exercise.eval = T}
+# create a simple raster
+r <- terra::rast(ncol=100, nrow=100, xmax=-80, xmin=-150, ymin=20, ymax=60)
+
+# set the cell values to the cell number
+values(r) <- 1:ncell(r)
+
+# print the CRS of the raster
+terra::crs(r, describe=TRUE, proj=TRUE)
+#
+#print the raster
+r
+#
+# plot the raster
+plot(r)
+```
+
+Before running the code below, make a prediction.
+
+```{r quiz-raster-transform, echo=F}
+quiz(
+  question("`r` has 100 rows and 100 columns. After projecting it from a Geographic CRS to a Lambert Conformal Conic (projected) CRS, do you expect the projected raster `r.proj` to have the exact same number of rows and columns as `r`?",
+    answer("Yes, projecting a raster only changes its CRS metadata, not its grid"),
+    answer("No, transforming a raster recalculates its grid, so its dimensions (and cell values) can change", correct = TRUE),
+    allow_retry = TRUE))
+```
+
+```{r raster-transform-2, exercise=TRUE, exercise.lines = 15, exercise.setup="raster-transform", exercise.eval = T}
+# define new projection
+newproj <- "+proj=lcc +lat_1=48 +lat_2=33 +lon_0=-100 +ellps=WGS84"
+
+# 'project' function from terra package
+r.proj <- terra::project(r, newproj)
+
+# print the crs details
+terra::crs(r.proj, describe=TRUE, proj=TRUE)
+#
+#print the raster
+r.proj
+#
+# plot the projected raster
+plot(r.proj)
+```
+
+```{r raster-transform-3, exercise=TRUE, exercise.lines = 15, exercise.setup="raster-transform-2", exercise.eval = T}
+# print original raster
+print(r)
+
+# print projected raster
+print(r.proj)
+```
+
+Be aware that different methods can be used to calculate the new cell values when rasters are transformed between CRSs. The default for numerical rasters is `bilinear` interpolation, which produces a continuous range of values between cell centers. However, when working with categorical rasters (e.g., a raster describing land cover classes), we should use `near` for nearest neighbor interpolation, which retains integer values (what land cover type would a value of, say, 4.31 be?). The interpolation method can be specified in the `project` function using the `method` argument.
+
+```{r quiz-interp-method, echo=F}
+quiz(
+  question("The `nlcd` raster below contains categorical land-cover codes (e.g., 41 = deciduous forest, 82 = cultivated crops). If you reproject it using `bilinear` interpolation instead of `near`, what's the most likely problem?",
+    answer("Nothing — bilinear is always the safer default"),
+    answer("Some cells will get non-integer values that don't correspond to any real land-cover class", correct = TRUE),
+    answer("The raster will fail to project at all"),
+    allow_retry = TRUE))
+```
+
+```{r interp-method, exercise=TRUE, exercise.lines = 15, exercise.eval = T}
+# load nlcd raster
+nlcd <- terra::rast("data/nlcd.tif")
+
+# print the nlcd raster
+print(nlcd)
+
+# plot the raster
+plot(nlcd)
+
+# project the raster & use nearest neighbor to retain cell values
+nlcd.near <- terra::project(nlcd, "EPSG:4326", method="near")
+
+# for demonstration purposes, using bilinear interpolation
+nlcd.bilin <- terra::project(nlcd, "EPSG:4326", method="bilinear")
+
+# plot the projected rasters
+par(mfrow=c(1,2))
+plot(nlcd.near, main = "nearest neighbor")
+plot(nlcd.bilin, main = "bilinear")
+#
+# print the nlcd.near raster
+print(nlcd.near)
+#
+# print the nlcd.bilin raster
+print(nlcd.bilin)
+```
+
+The `project` function in the `terra` package allows us to transform a raster using a template raster, which is the preferred method when possible. The template raster provides the new dimensions, extent, and resolution of the output raster. This is useful when we want to transform a raster to match the dimensions of another raster.
+
+
+```{r transform-using-rast-template, exercise=TRUE, exercise.lines = 15, exercise.setup="interp-method", exercise.eval = T}
+# create a new raster `a`
+a <- rast(ncols=40, nrows=40, xmin=-110, xmax=-90, ymin=40, ymax=60, crs="+proj=longlat +datum=WGS84")
+
+# set the cell values to the cell number
+values(a) <- 1:ncell(a)
+
+# print a
+print(a)
+
+# new CRS in proj4 format
+newcrs <- "+proj=lcc +lat_1=48 +lat_2=33 +lon_0=-100 +datum=WGS84"
+
+# create a new raster `b` with the new CRS
+b <- rast(ncols=94, nrows=124, xmin=-944881, xmax=935118, ymin=4664377, ymax=7144377, crs=newcrs)
+
+# print b
+print(b)
+
+# project the a raster using to the new CRS
+a.proj <- project(a, newcrs)
+
+# project the a raster using the template raster b
+a.proj.bTemplate <- project(a, b)
+
+# print the projected raster using the new CRS
+print(a.proj)
+
+# print the projected raster using the template raster b
+print(a.proj.bTemplate)
+
+# plot the projected rasters
+par(mfrow=c(1,2))
+plot(a.proj, main = "projected using new CRS")
+plot(a.proj.bTemplate, main = "projected using template raster b")
+```
+
+

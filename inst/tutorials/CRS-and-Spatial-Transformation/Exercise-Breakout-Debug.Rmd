@@ -1,0 +1,46 @@
+---
+title: "Breakout Activity - Debug: Mismatched CRS"
+output: html_document
+---
+
+## Breakout Activity - Debug: Mismatched CRS (CRS and Spatial Transformation)
+
+**Groups of 3-4. 5-8 minutes, then brief share-out.**
+
+A colleague is checking whether London falls within the UK boundary polygon. They load the UK
+boundary shapefile and reuse the projected London point from earlier in the tutorial, but the
+code below throws an error. Work through it as a group, diagnose the error, and fix it.
+
+```{r crs-mismatch-setup}
+# recreates the objects from the CRS-and-Spatial-Transformation tutorial, so this chunk runs standalone
+library(sf)
+library(dplyr)
+
+# UK boundary, in WGS84 (geographic)
+uk <- sf::st_read("data/uk.shp", quiet = TRUE)
+
+# London point, transformed to British National Grid (projected) earlier in the tutorial
+london <- data.frame(lon = -0.1, lat = 51.5) %>%
+  sf::st_as_sf(coords = c("lon", "lat"))
+london_geo <- sf::st_set_crs(london, value = 4326)
+london_proj <- sf::st_transform(london_geo, crs = 27700)
+```
+
+```{r broken-intersects, error=TRUE}
+# does the London point fall within the UK boundary?
+sf::st_intersects(uk, london_proj)
+```
+
+### Discussion questions
+
+1. What error do you get when you run the `broken-intersects` chunk?
+2. Check `sf::st_crs(uk)` and `sf::st_crs(london_proj)`. What's different between them, and why
+   does that explain the error? (Hint: re-read critical point #2 near the top of the tutorial.)
+3. Fix the code so `st_intersects()` runs. There are two valid fixes (transform `uk` to 27700, or
+   transform `london_proj` to 4326) — does it matter which one you pick here? Would your answer
+   change if `uk` were a raster instead of a polygon? (Hint: re-read critical point #4 near the
+   top of the tutorial.)
+4. Bonus: `sf::st_set_crs()` would also make the CRS "match" without an error. Why would that be
+   the *wrong* fix here?
+
+**Report back in the shared doc:** your fixed code, plus a one-sentence explanation of the bug.

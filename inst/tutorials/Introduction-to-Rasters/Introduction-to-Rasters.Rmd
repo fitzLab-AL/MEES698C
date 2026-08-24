@@ -1,0 +1,378 @@
+---
+title: "Introduction to Raster Data in R"
+output: 
+  learnr::tutorial:
+    progressive: true
+runtime: shiny_prerendered
+---
+
+```{r setup, include=FALSE}
+library(learnr)
+library(sf)
+library(dplyr)
+library(terra)
+knitr::opts_chunk$set(echo = FALSE)
+gradethis::gradethis_setup()
+tutorial_options(exercise.completion = FALSE)
+```
+
+## Introduction to Raster Data in R
+
+The goal of this tutorial is to teach basic methods for working with raster data in R. Most raster data processing is handled using the `terra` package, which is built on top of the `raster` package.
+
+### Exercise 1 - Create a raster
+
+A `raster` is a matrix of data values held in `cells` (the term `pixels` is generally reserved for images) representing a surface. A raster is defined by a few key properties, like the number of rows and columns of cells, the spatial extent, and the resolution.
+
+In R, we can create a raster object multiple ways using the `rast` function from the `terra` package, including from scratch and by reading a file from disk.
+
+Let's first create a raster object from scratch to demonstrate the structure of rasters. We will create a new raster with 10 rows and 10 columns (100 cells), covering a spatial extent from -150 to -80 in the x-direction (latitude) and from 20 to 60 in the y-direction (longitude).
+
+```{r raster-from-scratch-1, exercise=TRUE, exercise.eval = T, exercise.lines = 10}
+# all things raster, see also the raster package
+library(terra)
+
+# create a raster object by defining nrows and ncols,
+# as well as geographic extent
+myRast <- terra::rast(ncol=10, nrow=10, xmax=-80, xmin=-150, ymin=20, ymax=60)
+```
+
+#### **Write R code to perform the following tasks:** 
+
+1. Print the raster `myRast`.
+2. Get the `class` of `myRast`
+2. Plot `myRast`.
+ 
+```{r raster-from-scratch-1-exercise-1, exercise = TRUE, exercise.lines = 10, exercise.setup = "raster-from-scratch-1"}
+```
+
+```{r raster-from-scratch-1-exercise-1-solution}
+print(myRast)
+class(myRast)
+plot(myRast)
+```
+
+```{r raster-from-scratch-1-exercise-1-code-check}
+grade_code()
+```
+
+```{r raster-crs, echo=F}
+quiz(
+  question("What is the CRS of the raster `myRast` we just created?",
+    answer("NA. We need to define it first"),
+    answer("I have no idea."),
+    answer("R seems to have guessed that it is: lon/lat WGS 84", correct=TRUE),
+    allow_retry = TRUE),
+  question("What is the resolution of `myRast`?",
+    answer("10 x 10"),
+    answer("100"),
+    answer("7 x 4", correct=TRUE),
+    allow_retry  = TRUE),
+  question("How many layers does `myRast` have?",
+    answer("2"),
+    answer("1", correct=TRUE),
+    answer("3"),
+    allow_retry = TRUE),
+  question("What is the `class` of `myRast`?",
+    answer("raster"),
+    answer("SpatRaster", correct=TRUE),
+    answer("sf"),
+    allow_retry = TRUE),
+  question("Why is the plot of the SpatRaster object `myRast` blank?",
+    answer("I have no idea."),
+    answer("Because the cells of `myRast` contain no values.", correct=TRUE),
+    answer("I must have made a mistake."),
+    allow_retry = TRUE),
+  question("Rasters A and B cover the same spatial extent. Raster B has a resolution of 40m x 40m and 2,500 cells. Raster A covers the same extent at a finer resolution of 10m x 10m. How many cells does Raster A have?",
+    answer("2,500 - cell count doesn't depend on resolution if the extent is fixed"),
+    answer("10,000 - the resolution is 4x finer in each dimension, so cell count also scales by 4x"),
+    answer("40,000 - the resolution is 4x finer in each dimension, so cell count scales by 4x in both rows and columns (4 x 4 = 16x)", correct = TRUE),
+    allow_retry = TRUE))
+```
+
+### Exercise 2 - Adding data
+
+**A couple of important things:** 
+
+First, `rast` assigned a coordinate system to `myRast` because the x-y coordinates fell within the range of values covering the Earth (see `?rast` for details). Note also that the data in `myRast` is stored in memory (see `source(s)` slot) and the `name` slot contains the name of the single layer: `lyr.1`. 
+
+Second, the plot of `myRast` is blank because it contains no values - so let's add some data! We will assign 100 random values to fill the cells in the raster - but first let's confirm whether the cells in `myRast` contain data values or are empty (we already know the answer, this is for demonstration).
+
+```{r check-raster-values-1, exercise=TRUE, exercise.eval = T, exercise.lines = 4, exercise.setup = "raster-from-scratch-1"}
+terra::hasValues(myRast)
+```
+
+Let's now add random data using `runif` and add the same number of values as the number of cells in the raster (100).
+
+```{r check-raster-values-2, exercise=TRUE, exercise.eval = T, exercise.lines = 6, exercise.setup = "raster-from-scratch-1"}
+# add random values to r
+set.seed(809)
+values(myRast) <- runif(n=ncell(myRast))
+
+# confirm that the raster now has values
+terra::hasValues(myRast)
+```
+
+Now that we have added data to the raster, let's plot it again.
+
+```{r check-raster-values-3, exercise=TRUE, exercise.eval = T, exercise.lines = 3, exercise.setup = "check-raster-values-2"}
+plot(myRast)
+```
+
+There are many ways to add values to a raster and/or change individual cell values. Keep in mind that rasters are in essence matrices of numbers and therefore cells can be indexed (or subsetted) using row and column numbers and the base `myRast` operator `[`. We can also index cells using the cell ID number, cell coordinates, or another raster object.
+
+Each cell has a unique integer ID, starting with 1 at the top left and increasing (row-wise) to `ncells` at the lower right. Before we try indexing, let's replace the random values in `myRast` with a sequence of numbers to better understand the relationship between row number, column number, and cell number: 
+
+```{r assign-vector, exercise=TRUE, exercise.eval = T, exercise.setup = "raster-from-scratch-1"}
+# add sequence of numbers
+values(myRast) <- 1:ncell(myRast)
+
+# print myRast
+myRast 
+
+#plot myRast
+plot(myRast) 
+```
+
+```{r raster-values-1, echo=F}
+quiz(
+  question("Was the sequence of numbers added `row-wise` or `column-wise`?",
+    answer("Column-wise"),
+    answer("I have no idea."),
+    answer("Row-wise.", correct=TRUE),
+    allow_retry = TRUE))
+```
+
+#### **Write R code to perform the following tasks:** 
+
+1. Get the value of the cell in row 3, column 10.
+2. Get the value in cell IDs 10, 38, and 89.
+3. Change the value in cell ID 50 to 100.
+ 
+```{r rast-index-quiz, exercise = TRUE, exercise.lines = 10, exercise.setup = "assign-vector"}
+
+```
+
+```{r rast-index-quiz-solution}
+# value in row 3, col 10
+myRast[3,10]
+
+# value in cellID = 38
+myRast[c(10, 38, 89)]
+
+# change value in cellID 50 to 100
+myRast[50] <- 100
+```
+
+```{r rast-index-quiz-check}
+grade_code()
+```
+
+### Exercise 3 - Raster stacks
+
+While we often work with a single raster at a time, it is also common to work with a set of rasters covering the same region (e.g., rasters of land cover, elevation, and temperature for Maryland). Rather than handling these as individual objects, it is preferable to work with them as a `stack`. This is much more efficient as any operation(s) you perform on a `stack` is performed simultaneously on all rasters in the `stack`. 
+
+The catch is that rasters can only be stacked if they overlap perfectly - meaning all rasters in a stack have to have the same resolution (cell size) and extent, which means they also have the same number of rows and columns and origin (typically the coordinate of the lower left-most cell). Meeting these requirements can be a bit of a challenge if you are working with multiple raster datasets from different sources and that differ in resolution, extent, etc. Luckily there are tools to make a set of rasters stackable, which we will cover later.
+
+Lets create a few rasters and build a stack. We can do that by creating new versions of our existing raster object `myRast`.
+
+```{r raster-stacks, exercise=TRUE, exercise.eval = T, exercise.lines = 20, exercise.setup = "assign-vector"}
+# make copies of myRast
+myRast3 <- myRast2 <- myRast
+
+# add random values to each raster
+values(myRast2) <- runif(ncell(myRast))
+values(myRast3) <- runif(ncell(myRast))
+
+# create a stack
+rrr <- c(myRast,myRast2,myRast3)
+
+# print new stack
+rrr
+
+# how many layers in rrr?
+terra::nlyr(rrr)
+
+# the class of rrr is the same as that of myRast
+class(rrr)
+```
+
+Now, lets give each layer a unique name and plot the stack.
+
+```{r raster-stacks-2, exercise=TRUE, exercise.eval = T, exercise.lines = 20, exercise.setup = "raster-stacks"}
+# give the individual rasters names
+names(rrr) <-paste0("myRast", c(1:3)) # see what I did here?
+ 
+# plot the stack
+plot(rrr)
+```
+
+### Exercise 4 - Indexing & subsetting raster stacks
+
+Indexing raster stacks is similar to indexing single rasters, but with an additional dimension. We can index a raster stack using the `[[` operator, followed by the name (or number) of the raster we want to access. 
+
+#### **Write R code to perform the following tasks:** 
+
+1. Get the value of the cell in row 3, column 10 of `myRast2` using both the layer number and layer name.
+2. Get the value in cell IDs 10, 38, and 89 of `myRast1`.
+3. Change the value in cell ID 50 to 100 of all three layers in `rrr`.
+
+```{r rast-quiz-stack-index, exercise = TRUE, exercise.lines = 15, exercise.setup = "raster-stacks"}
+
+```
+
+```{r rast-quiz-stack-index-solution, exercise.lines = 15}
+# value in row 3, col 10 by number
+rrr[[2]][3,10]
+
+# value in row 3, col 10 by number
+rrr[["myRast2"]][3,10]
+
+# value in cell IDs 10, 38, and 89
+rrr[[1]][c(10,38,89)]
+
+# change value in cell ID 50 to 100 of all three layers in rrr
+rrr[[c(1,2,3)]][50] <- 100
+```
+
+```{r rast-quiz-stack-index-check}
+grade_code()
+```
+
+We can also subset a raster stack by layer number or name. For example, to extract the first raster in the stack, we can use `rrr[[1]]` or `rrr[["myRast1"]]`. We can also use functions like `subset` to extract a subset of the raster stack based on a condition. 
+
+```{r rast-stack-subset, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "raster-stacks"}
+# extract r1 from rrr
+r1 <- rrr[[1]]
+# or
+r1 <- rrr[["myRast1"]]
+
+# print r1
+print(r1)
+
+# remove myRast2 from rrr
+rr <- rrr[[-2]]
+# or
+rr <- rrr[[c(1,3)]]
+# or
+rr <- subset(rrr, c("myRast1", "myRast3"))
+
+# print rr
+print(rr)
+```
+
+### Exercise 5 - Reading / writing rasters to disk
+
+While spatial vector data are almost universally stored in shapefiles, raster data can be stored in a variety of formats, including GeoTIFF, ESRI Grid, and Erdas Imagine, among many others. In `myRast`, we can read raster data using the `rast` function.
+
+```{r raster-file-read, exercise=TRUE, exercise.lines = 15, exercise.eval = T}
+# path to a raster file that comes with the terra package
+# the system.file function is used to locate R system files only
+rfile <- system.file("ex/elev.tif", package="terra")
+
+# read the raster file
+elev <- terra::rast(rfile)
+
+# plot the raster
+plot(elev)
+```
+
+We can save the raster `elev` to disk using the `writeRaster` function, but before we do that, lets perform some raster algebra to create some new raster objects and create a raster stack. You can perform raster algebra using the standard arithmetic operators in `R` (e.g., `+`, `-`, `*`, `/`, `^`) using numbers or other rasters.
+
+```{r raster-algebra, exercise=TRUE, exercise.eval = T, exercise.lines = 15, exercise.setup = "raster-file-read"}
+# create a new raster object by adding 100 to the values in elev
+elev100 <- elev*100
+
+# create a new raster object by multiplying the values in elev by 2
+elev2 <- elev * elev
+
+# plot the new rasters
+par(mfrow=c(1,3)) # divide plot window into 1 row, 3 cols
+plot(elev, main="elev")
+plot(elev100, main="elev * 100")
+plot(elev2, main=expression(elev^2))
+
+# make a stack of the new rasters
+elevStack <- c(elev, elev100, elev2)
+
+elevStack
+```
+
+Note that we can save both rasters and raster stacks to a single file, in this case as GeoTiffs.
+
+```{r raster-file-save, exercise=TRUE, exercise.eval = T, exercise.lines = 5, exercise.setup = "raster-file-read"}
+# save elev to disk
+# written to tempdir() since the app directory is read-only once deployed to shinyapps.io
+terra::writeRaster(elev, file.path(tempdir(), "elevStack.tif"), overwrite=TRUE)
+
+# save elevStack to disk
+# this will produce a single file with 3 layers
+terra::writeRaster(elevStack, file.path(tempdir(), "elevStack.tif"), overwrite=TRUE)
+```
+
+### Exercise 6 - Local, focal, zonal, and global operations
+
+`terra` groups raster calculations into four categories, based on which cells contribute to
+each output value:
+
+* **Local** - each output cell depends only on the input cell(s) at that same location. The
+  raster algebra in Exercise 5 (`elev*100`) is a local operation; `terra::app()` generalizes
+  this to arbitrary functions, not just simple arithmetic.
+* **Focal** - each output cell depends on a neighborhood of surrounding cells (a moving
+  window), e.g. smoothing a raster with a mean filter.
+* **Zonal** - cells are grouped into zones (defined by another raster) and summarized within
+  each zone, e.g. mean elevation per land cover class.
+* **Global** - all cells in the raster contribute to a single summary value, e.g. the overall
+  mean.
+
+```{r local-op, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "raster-file-read"}
+# LOCAL: terra::app() applies a function to each cell independently.
+# Here we threshold elev into a binary "high elevation" mask - something
+# simple raster algebra (elev*100) can't do in a single expression.
+elev_high <- terra::app(elev, fun = function(x) ifelse(x > 300, 1, 0))
+
+# plot the result
+plot(elev_high, main = "elev_high: 1 = elevation > 300")
+```
+
+```{r focal-op, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "raster-file-read"}
+# FOCAL: terra::focal() computes a moving-window statistic.
+# w = 3 means a 3x3 window; fun = "mean" smooths the raster.
+elev_smooth <- terra::focal(elev, w = 3, fun = "mean")
+
+# compare the original and the smoothed version
+par(mfrow=c(1,2))
+plot(elev, main = "elev")
+plot(elev_smooth, main = "focal: 3x3 mean")
+```
+
+```{r zonal-global-op, exercise=TRUE, exercise.eval = T, exercise.lines = 15, exercise.setup = "raster-file-read"}
+# create a simple zone raster by splitting elev into 3 equal-width classes
+zones <- elev
+values(zones) <- as.integer(cut(values(elev)[,1], breaks = 3))
+plot(zones, main = "elevation zones")
+
+# ZONAL: mean elev within each zone
+terra::zonal(elev, zones, fun = "mean")
+
+# GLOBAL: a single summary value for the entire raster
+terra::global(elev, fun = "mean", na.rm = TRUE)
+```
+
+```{r local-focal-zonal-global-quiz, echo=F}
+quiz(
+  question("Which category of operation would you use to calculate mean annual temperature per watershed, given a temperature raster and a watershed-boundary raster?",
+    answer("Local"),
+    answer("Focal"),
+    answer("Zonal", correct = TRUE),
+    answer("Global"),
+    allow_retry = TRUE),
+  question("Which category of operation would you use to smooth a noisy elevation raster by averaging each cell with its immediate neighbors?",
+    answer("Local"),
+    answer("Focal", correct = TRUE),
+    answer("Zonal"),
+    answer("Global"),
+    allow_retry = TRUE))
+```
+
+
