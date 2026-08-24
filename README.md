@@ -7,7 +7,7 @@ versions of these tutorials, which slowed down or failed under concurrent studen
 
 ```r
 install.packages("remotes")
-remotes::install_github("fitzLab-AL/spatialEcology", subdir = "meesSpatialEcology")
+remotes::install_github("fitzLab-AL/meesSpatialEcology")
 ```
 
 ## Run a tutorial
