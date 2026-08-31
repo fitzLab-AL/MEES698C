@@ -6,7 +6,7 @@
 # installed package's namespace (as learnr::run_tutorial() itself does) triggers
 # "Error in `plot.xy()`: invalid type passed to graphics function" on any tutorial that
 # plots a raw terra raster. Sourcing this file defines run_tutorial() in your own
-# environment instead, which does not hit that bug. See README for details.
+# environment instead, which does not hit that bug.
 run_tutorial <- function(name, launch.browser = TRUE) {
   tutorial_dir <- system.file("tutorials", name, package = "meesSpatialEcology")
   if (!nzchar(tutorial_dir)) {
