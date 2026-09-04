@@ -23,7 +23,7 @@ tutorial_options(exercise.completion = FALSE)
 
 ## Advanced Spatial Data in R
 
-This tutorial builds on basic R skills for working with vector and raster data in R, with an emphasis on preparing and combining combining vector and raster data from different sources. The goal is to produce a final data set that contains both biological and environmental data with a structure suitable for spatial analyses and modeling.
+This tutorial builds on basic R skills for working with vector and raster data in R, with an emphasis on preparing and combining vector and raster data from different sources. The goal is to produce a final data set that contains both biological and environmental data with a structure suitable for spatial analyses and modeling.
 
 In addition to the using the `sf` and `terra` packages, we will also use the `geodata` package to download species occurrence data from the [Global Biodiversity Information Facility (GBIF)](http://gbif.org) (http://gbif.org), a massive online "database of databases" housing billions of biodiversity records. We will use the `rnaturalearth` package to download country boundaries and `ggplot2` to make maps.
 
@@ -206,8 +206,15 @@ karri.sw <- sf::st_intersection(karri.sf, swPolyProj)
 Next, we will download and work with raster data. We will use the `geodata` package to download global bioclimatic variables at 10 arc-minute resolution from the [WorldClim](http://worldclim.org) database. We will then crop these data to the extent of Australia and extract values for the karri records. 
 
 ```{r download-raster, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup = "transform-swPoly"}
-# download raster data for Australia
-bioclimVars <- geodata::worldclim_global(country = "AUS", res = 10, var = "bio", path="~/data")
+# download the global bioclim rasters at 10 arc-minute resolution.
+# NOTE: worldclim_global() takes var/res/path - there is no country argument,
+# so this downloads the global dataset, which we crop to Australia below.
+# The files are cached in ~/data, so this only downloads once.
+bioclimVars <- geodata::worldclim_global(res = 10, var = "bio", path="~/data")
+
+# the layers arrive with long names like "wc2.1_10m_bio_1" - rename them to
+# bio1...bio19 so they are easier to refer to later
+names(bioclimVars) <- paste0("bio", 1:19)
 
 # check the data
 bioclimVars
@@ -263,7 +270,7 @@ summary(karri.bioclim)
 
 #### **Write R code to perform the following tasks:**  
 1. Remove any records with NA values. 
-2. Add the raster values to the `karri.sw` object. In other words, make these data additioanl attributes of `karri.sw`.
+2. Add the raster values to the `karri.sw` object. In other words, make these data additional attributes of `karri.sw`.
 3. Save the final attribute and geographic data of `karri.sw` to a comma-separated file (.csv) for further analysis.
  
 ```{r final-table-quiz, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup = "extract-raster"}
@@ -278,12 +285,87 @@ karri.bioclim <- karri.bioclim[!is.na(karri.bioclim$bio1),]
 karri.sw <- cbind(karri.sw, karri.bioclim)
 
 # save the final data to a csv file
-# written to tempdir() since the app directory is read-only once deployed to shinyapps.io
+# written to tempdir() so the tutorial does not write into your working directory
 write.csv(karri.sw, file.path(tempdir(), "karri_final.csv"))
 ```
  
 ```{r final-table-quiz-check}
 grade_code()
+```
+
+### Exercise 5 - Sampling background climate with `spatSample()`
+
+You now know the climate *at* the places karri has been observed. On its own that tells you very
+little: to say anything about the species' climatic niche you need something to compare it
+against - the range of climates that are *available* across the region. If karri occurs where
+rainfall is 1000 mm, that only becomes interesting once you know whether most of Australia is
+wetter or drier than that.
+
+The standard way to build that comparison is to draw a random sample of cells from the raster
+stack. `terra::spatSample()` does exactly this. The sample stands in for the available
+("background") climate, and its `size` argument controls how many cells you draw.
+
+```{r background-sample, exercise=TRUE, exercise.lines = 30, exercise.eval = T, exercise.setup = "extract-raster"}
+# a random sample of the climate available across Australia.
+# na.rm = TRUE avoids drawing cells in the ocean, which have no data.
+set.seed(809)
+bgClim <- terra::spatSample(ausBioclim, size = 5000, method = "random", na.rm = TRUE)
+
+# how many did we get, and what does it look like?
+dim(bgClim)
+head(bgClim[, 1:4])
+
+# compare karri's climate (red) to Australia's climate generally (black)
+par(mfrow = c(1, 2))
+
+plot(density(bgClim$bio1), col = "black", main = "bio1: mean annual temperature",
+     xlab = "degrees C")
+lines(density(karri.bioclim$bio1), col = "red")
+legend("topright", legend = c("Australia", "karri"), col = c("black", "red"),
+       lwd = 2, bty = "n", cex = 0.8)
+
+plot(density(bgClim$bio12), col = "black", main = "bio12: annual precipitation",
+     xlab = "mm")
+lines(density(karri.bioclim$bio12), col = "red")
+```
+
+The two curves are the whole point: where the red curve sits relative to the black one is a
+first, purely visual description of the species' climatic niche - no model required.
+
+If you need background *locations* rather than just values (which you will when we get to
+species distribution models), ask `spatSample()` for the coordinates as well:
+
+```{r background-points, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup = "extract-raster"}
+set.seed(809)
+
+# xy = TRUE returns the cell coordinates alongside the values
+bgPts <- terra::spatSample(ausBioclim, size = 500, method = "random",
+                           na.rm = TRUE, xy = TRUE)
+
+head(bgPts[, 1:4])
+
+# those coordinates can be turned straight into an sf object
+bg.sf <- sf::st_as_sf(bgPts, coords = c("x", "y"), crs = sf::st_crs(ausBioclim))
+bg.sf
+```
+
+```{r spatsample-quiz, echo=F}
+quiz(
+  question("What does the `size` argument of `spatSample()` control?",
+    answer("The physical area, in km2, that each sampled cell covers"),
+    answer("The number of cells drawn from the raster", correct = TRUE),
+    answer("The resolution of the raster that gets returned"),
+    allow_retry = TRUE),
+  question("Why would drawing too few background samples make the comparison above misleading?",
+    answer("The species records would be resampled as well, biasing them"),
+    answer("A small sample may not capture the true range and variability of climates across the region, so the background curve becomes noisy and can miss uncommon conditions entirely", correct = TRUE),
+    answer("`spatSample()` requires at least 1000 points to run"),
+    allow_retry = TRUE),
+  question("Why do we pass `na.rm = TRUE`?",
+    answer("To remove karri records that have missing coordinates"),
+    answer("To avoid sampling cells with no data - here, cells over the ocean - which would otherwise enter the background sample as NAs", correct = TRUE),
+    answer("It is required whenever the raster has more than one layer"),
+    allow_retry = TRUE))
 ```
 
 

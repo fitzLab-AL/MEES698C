@@ -146,11 +146,11 @@ quiz(
 
 ### Exercise 3 - Define the CRS (Coordinate Reference System)
 
-We will cover the details of **C**oordinate **R**eference **S**ystems (CRS) in [another tutorial](https://fitzlab.shinyapps.io/CRS-and-Spatial-Transformation/), but for now, let's just define the CRS for the `lonlat.sf` object. Most of the time, spatial data will come with the CRS already defined, but not always. Or, you may created a spatial object from a spreadsheet and will need to define the CRS. Either way, you need to be diligent about understanding and checking the CRS of your data. **NOTE:** *Defining* the CRS is different from *transforming* the data to a different CRS! Defining the CRS is telling `R` what the CRS is, while transforming the data alters calculates the spatial coordinates defining the positions of the object to new coordinates. More on this later too. 
+We will cover the details of **C**oordinate **R**eference **S**ystems (CRS) in the `CRS-and-Spatial-Transformation` tutorial in this package, but for now, let's just define the CRS for the `lonlat.sf` object. Most of the time, spatial data will come with the CRS already defined, but not always. Or, you may created a spatial object from a spreadsheet and will need to define the CRS. Either way, you need to be diligent about understanding and checking the CRS of your data. **NOTE:** *Defining* the CRS is different from *transforming* the data to a different CRS! Defining the CRS is telling `R` what the CRS is, while transforming the data alters calculates the spatial coordinates defining the positions of the object to new coordinates. More on this later too. 
 
-There are two main ways to describe a CRS in `R`: (1) an `EPSG` code or a `proj4string`. An `EPSG` code is shorter and therefore easier to remember, and refers to exactly one particular, CRS with defined attributes. In contrast, a `proj4string` allows you more flexibility when it comes to specifying different parameters such as the projection type, the datum, and the ellipsoid, allowing one to control many different projections and modify existing ones - which also makes the `proj4string` much more complicated. 
+There are two ways you will normally describe a CRS in `R`. An **`EPSG` code** is a short integer that refers to exactly one fully-specified CRS - this is the everyday shorthand and what you should reach for first. **WKT2** (well-known text) is the full, formal description of that same CRS, and it is what `sf` and `terra` actually store and print internally. You may also encounter an older notation, the **`proj4string`** (e.g. `"+proj=longlat +datum=WGS84"`). It still works as *input*, but it has been legacy since PROJ 6 and can silently lose datum information, so prefer EPSG codes or WKT2 for new work. 
 
-We will use the `st_crs` function to define the CRS as EPSG:4326. See [EPSG:4326](https://epsg.io/4326) (https://epsg.io/4326) for details. 
+We will use the `st_crs` function to define the CRS as EPSG:4326. Look codes up at [epsg.org](https://epsg.org/) (the official IOGP registry) or at [epsg.io](https://epsg.io/4326) (a friendlier third-party front end to the same database). 
 
 ```{r crs-1, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "spatial-object"}
 # get attributes of the CRS
@@ -208,7 +208,7 @@ ggplot(climatePts) +
 
 ### Exercise 5 - Create a polygon geometry
 
-The `sf` data class can represents 7 core geometry types (but not any raster data classes!): points, lines, polygons and their respective ‘multi’ versions, which group together features of the same type into a single feature. `sf` also supports geometry collections, which can contain multiple geometry types in a single object.
+The `sf` data class supports all 17 geometry types defined by the Open Geospatial Consortium, but in practice you will use a handful of them (and none of them are raster classes!): points, lines, polygons, their respective ‘multi’ versions, which group features of the same type into a single feature, and geometry collections, which can hold multiple geometry types in one object.
 
 Here, we create a polygon geometry using the `st_polygon` function. We then convert the polygon geometry to an `sf` object using the `st_sf` function.
 
@@ -275,7 +275,7 @@ nc.area <- nc %>%
 print(nc.area)
 
 # save the subset as a new shapefile
-# written to tempdir() since the app directory is read-only once deployed to shinyapps.io
+# written to tempdir() so the tutorial does not write into your working directory
 sf::st_write(nc.area, file.path(tempdir(), "nc_area.shp"), delete_layer=T)
 ```
 
@@ -285,5 +285,98 @@ quiz(
     answer("An error - `sf` requires a `.prj` file to read a shapefile."),
     answer("`NA` - the CRS is undefined, even though the coordinates themselves are still readable.", correct = TRUE),
     answer("It automatically assumes WGS84 (EPSG:4326)."),
+    allow_retry = TRUE))
+```
+
+The shapefile is the format you will meet most often, but it is not the only one, and it has real
+limitations - notably that it is several files that must travel together, and that it truncates
+attribute names to 10 characters. `st_read()` and `st_write()` use GDAL under the hood, so they
+handle many other formats, inferred from the file extension. GeoJSON (`.geojson`) is a common
+alternative, especially for web mapping, and keeps everything in a single plain-text file.
+
+```{r write-geojson, exercise=TRUE, exercise.eval = T, exercise.lines = 12, exercise.setup = "read-shapefile"}
+# same object, written to a different format - just change the extension
+gj <- file.path(tempdir(), "nc.geojson")
+sf::st_write(nc, gj, delete_dsn = TRUE, quiet = TRUE)
+
+# read it back
+nc.gj <- sf::st_read(gj, quiet = TRUE)
+
+# note that the attribute names survive intact (no 10-character truncation)
+names(nc.gj)
+```
+
+### Exercise 7 - Spatial joins and distances
+
+Two operations come up constantly once you are working with real data: asking *which polygon
+does each point fall in?* and *how far apart are these features?*
+
+**Spatial joins.** `st_join()` attaches the attributes of one layer to another based on their
+spatial relationship - for example, tagging each occurrence record with the county, watershed, or
+protected area it falls inside. It works like a regular table join, except that the matching is
+done by geometry rather than by a shared ID column.
+
+```{r spatial-join, exercise=TRUE, exercise.eval = T, exercise.lines = 25, exercise.setup = "read-shapefile"}
+# make 20 random points within the bounding box of nc
+set.seed(809)
+bb <- sf::st_bbox(nc)
+pts <- data.frame(lon = runif(20, bb["xmin"], bb["xmax"]),
+                  lat = runif(20, bb["ymin"], bb["ymax"]))
+
+# convert to sf, using the SAME CRS as nc (a spatial join requires matching CRSs)
+pts.sf <- sf::st_as_sf(pts, coords = c("lon", "lat"), crs = sf::st_crs(nc))
+
+# which county does each point fall in?
+pts.joined <- sf::st_join(pts.sf, nc[, c("NAME", "AREA")])
+
+# each point now carries the attributes of the county containing it
+head(pts.joined)
+
+# points that fell outside every county get NA
+sum(is.na(pts.joined$NAME))
+
+# plot: counties, with the points on top
+plot(sf::st_geometry(nc), border = "grey70")
+plot(sf::st_geometry(pts.sf), add = TRUE, pch = 19, col = "red")
+```
+
+**Distances.** `st_distance()` returns pairwise distances between features. Distance is one of
+those calculations where the CRS really matters, so we project first - `nc` is in a geographic
+CRS (degrees) and we want an answer in meters.
+
+```{r spatial-distance, exercise=TRUE, exercise.eval = T, exercise.lines = 25, exercise.setup = "read-shapefile"}
+# nc is in a geographic CRS
+sf::st_is_longlat(nc)
+
+# project to NAD83 / North Carolina (EPSG:32119), a projected CRS in meters
+nc.proj <- sf::st_transform(nc, 32119)
+
+# centroids of the first 5 counties
+cent <- sf::st_centroid(nc.proj[1:5, ])
+
+# pairwise distances among those 5 centroids - note the units attached to the result
+d <- sf::st_distance(cent)
+d
+
+# distance from the first county centroid to every county, converted to km
+d1 <- sf::st_distance(cent[1, ], nc.proj)
+round(sort(as.numeric(d1))[1:5] / 1000, 1)
+
+# which other county is nearest to the first one?
+nearest <- sf::st_nearest_feature(cent[1, ], nc.proj[-1, ])
+nc.proj[-1, ][nearest, ]$NAME
+```
+
+```{r join-distance-quiz, echo=F}
+quiz(
+  question("You run `st_join(points, polygons)` and every row comes back with `NA` for the polygon attributes, with no error. What is the most likely cause?",
+    answer("The polygons layer has no attribute columns to join"),
+    answer("The two layers are in different CRSs, or simply don't overlap in space, so nothing matches", correct = TRUE),
+    answer("`st_join()` only works on projected data"),
+    allow_retry = TRUE),
+  question("Why did we project `nc` before calling `st_distance()`?",
+    answer("`st_distance()` refuses to run on geographic coordinates"),
+    answer("So distances come back in meaningful, constant linear units rather than depending on angular degree coordinates", correct = TRUE),
+    answer("Projecting makes the calculation run faster"),
     allow_retry = TRUE))
 ```

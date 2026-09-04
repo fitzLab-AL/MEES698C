@@ -18,7 +18,7 @@ tutorial_options(exercise.completion = FALSE)
 
 ## Introduction to Raster Data in R
 
-The goal of this tutorial is to teach basic methods for working with raster data in R. Most raster data processing is handled using the `terra` package, which is built on top of the `raster` package.
+The goal of this tutorial is to teach basic methods for working with raster data in R. Most raster data processing is handled using the `terra` package. You may see the older `raster` package in code and tutorials online - `terra` is its faster, ground-up replacement by the same author, not a layer built on top of it. In fact the dependency now runs the other way: the current `raster` package is itself built on `terra`. Use `terra` for new work.
 
 ### Exercise 1 - Create a raster
 
@@ -26,7 +26,7 @@ A `raster` is a matrix of data values held in `cells` (the term `pixels` is gene
 
 In R, we can create a raster object multiple ways using the `rast` function from the `terra` package, including from scratch and by reading a file from disk.
 
-Let's first create a raster object from scratch to demonstrate the structure of rasters. We will create a new raster with 10 rows and 10 columns (100 cells), covering a spatial extent from -150 to -80 in the x-direction (latitude) and from 20 to 60 in the y-direction (longitude).
+Let's first create a raster object from scratch to demonstrate the structure of rasters. We will create a new raster with 10 rows and 10 columns (100 cells), covering a spatial extent from -150 to -80 in the x-direction (longitude) and from 20 to 60 in the y-direction (latitude).
 
 ```{r raster-from-scratch-1, exercise=TRUE, exercise.eval = T, exercise.lines = 10}
 # all things raster, see also the raster package
@@ -41,7 +41,7 @@ myRast <- terra::rast(ncol=10, nrow=10, xmax=-80, xmin=-150, ymin=20, ymax=60)
 
 1. Print the raster `myRast`.
 2. Get the `class` of `myRast`
-2. Plot `myRast`.
+3. Plot `myRast`.
  
 ```{r raster-from-scratch-1-exercise-1, exercise = TRUE, exercise.lines = 10, exercise.setup = "raster-from-scratch-1"}
 ```
@@ -119,7 +119,7 @@ Now that we have added data to the raster, let's plot it again.
 plot(myRast)
 ```
 
-There are many ways to add values to a raster and/or change individual cell values. Keep in mind that rasters are in essence matrices of numbers and therefore cells can be indexed (or subsetted) using row and column numbers and the base `myRast` operator `[`. We can also index cells using the cell ID number, cell coordinates, or another raster object.
+There are many ways to add values to a raster and/or change individual cell values. Keep in mind that rasters are in essence matrices of numbers and therefore cells can be indexed (or subsetted) using row and column numbers and the base R operator `[`. We can also index cells using the cell ID number, cell coordinates, or another raster object.
 
 Each cell has a unique integer ID, starting with 1 at the top left and increasing (row-wise) to `ncells` at the lower right. Before we try indexing, let's replace the random values in `myRast` with a sequence of numbers to better understand the relationship between row number, column number, and cell number: 
 
@@ -217,7 +217,7 @@ Indexing raster stacks is similar to indexing single rasters, but with an additi
 2. Get the value in cell IDs 10, 38, and 89 of `myRast1`.
 3. Change the value in cell ID 50 to 100 of all three layers in `rrr`.
 
-```{r rast-quiz-stack-index, exercise = TRUE, exercise.lines = 15, exercise.setup = "raster-stacks"}
+```{r rast-quiz-stack-index, exercise = TRUE, exercise.lines = 15, exercise.setup = "raster-stacks-2"}
 
 ```
 
@@ -241,7 +241,7 @@ grade_code()
 
 We can also subset a raster stack by layer number or name. For example, to extract the first raster in the stack, we can use `rrr[[1]]` or `rrr[["myRast1"]]`. We can also use functions like `subset` to extract a subset of the raster stack based on a condition. 
 
-```{r rast-stack-subset, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "raster-stacks"}
+```{r rast-stack-subset, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "raster-stacks-2"}
 # extract r1 from rrr
 r1 <- rrr[[1]]
 # or
@@ -263,7 +263,7 @@ print(rr)
 
 ### Exercise 5 - Reading / writing rasters to disk
 
-While spatial vector data are almost universally stored in shapefiles, raster data can be stored in a variety of formats, including GeoTIFF, ESRI Grid, and Erdas Imagine, among many others. In `myRast`, we can read raster data using the `rast` function.
+While spatial vector data are almost universally stored in shapefiles, raster data can be stored in a variety of formats, including GeoTIFF, ESRI Grid, and Erdas Imagine, among many others. In `terra`, we can read raster data using the `rast` function.
 
 ```{r raster-file-read, exercise=TRUE, exercise.lines = 15, exercise.eval = T}
 # path to a raster file that comes with the terra package
@@ -300,10 +300,10 @@ elevStack
 
 Note that we can save both rasters and raster stacks to a single file, in this case as GeoTiffs.
 
-```{r raster-file-save, exercise=TRUE, exercise.eval = T, exercise.lines = 5, exercise.setup = "raster-file-read"}
+```{r raster-file-save, exercise=TRUE, exercise.eval = T, exercise.lines = 5, exercise.setup = "raster-algebra"}
 # save elev to disk
-# written to tempdir() since the app directory is read-only once deployed to shinyapps.io
-terra::writeRaster(elev, file.path(tempdir(), "elevStack.tif"), overwrite=TRUE)
+# written to tempdir() so the tutorial doesn't write into your working directory
+terra::writeRaster(elev, file.path(tempdir(), "elev.tif"), overwrite=TRUE)
 
 # save elevStack to disk
 # this will produce a single file with 3 layers
@@ -359,6 +359,25 @@ terra::zonal(elev, zones, fun = "mean")
 terra::global(elev, fun = "mean", na.rm = TRUE)
 ```
 
+Another common local operation is *reclassifying* a continuous raster into a smaller number of
+classes. `terra::classify()` does this with a reclassification matrix, where each row gives
+`from`, `to`, and the new value to assign:
+
+```{r classify-op, exercise=TRUE, exercise.eval = T, exercise.lines = 15, exercise.setup = "raster-file-read"}
+# a reclassification matrix: from, to, becomes
+rcl <- matrix(c(  0, 300, 1,
+                300, 400, 2,
+                400, 600, 3), ncol = 3, byrow = TRUE)
+
+# reclassify elevation into 3 classes
+elev_class <- terra::classify(elev, rcl)
+
+# compare the original and the classified version
+par(mfrow=c(1,2))
+plot(elev, main = "elev (continuous)")
+plot(elev_class, main = "elev reclassified (3 classes)")
+```
+
 ```{r local-focal-zonal-global-quiz, echo=F}
 quiz(
   question("Which category of operation would you use to calculate mean annual temperature per watershed, given a temperature raster and a watershed-boundary raster?",
@@ -372,6 +391,146 @@ quiz(
     answer("Focal", correct = TRUE),
     answer("Zonal"),
     answer("Global"),
+    allow_retry = TRUE))
+```
+
+### Exercise 7 - Changing resolution and aligning rasters
+
+Recall from Exercise 3 that rasters can only be stacked if they line up perfectly - same
+resolution, extent, and origin. In practice, raster data from different sources almost never
+line up, so you need tools to change a raster's grain and to force one raster onto another's
+grid.
+
+**Changing grain: `aggregate()` and `disagg()`.** `aggregate()` makes cells *bigger* (coarser
+resolution, fewer cells) by combining blocks of cells with a function; `disagg()` does the
+reverse. Note how the cell count changes - this is the resolution/extent trade-off from lecture,
+made concrete.
+
+```{r aggregate-op, exercise=TRUE, exercise.eval = T, exercise.lines = 20, exercise.setup = "raster-file-read"}
+# aggregate by a factor of 4: cells become 4x wider AND 4x taller
+elev_coarse <- terra::aggregate(elev, fact = 4, fun = "mean")
+
+# compare resolution and cell counts
+res(elev)
+res(elev_coarse)
+
+# how many cells did we go from / to?
+c(original = ncell(elev), aggregated = ncell(elev_coarse))
+
+# plot both
+par(mfrow=c(1,2))
+plot(elev, main = "elev (original grain)")
+plot(elev_coarse, main = "aggregate(fact = 4)")
+```
+
+```{r aggregate-quiz, echo=F}
+quiz(
+  question("You aggregate a raster with `fact = 4`. Roughly what happens to the number of cells?",
+    answer("It drops to about 1/4 of the original"),
+    answer("It drops to about 1/16 of the original", correct = TRUE),
+    answer("It stays the same - only the cell values change"),
+    answer("It increases by 16x"),
+    allow_retry = TRUE),
+  question("Why use `fun = \"mean\"` for elevation but `fun = \"modal\"` for a land-cover raster when aggregating?",
+    answer("`modal` is faster on large rasters"),
+    answer("Averaging land-cover class codes would produce meaningless values that match no real class, while the modal (most common) class is a valid class", correct = TRUE),
+    answer("There is no difference; they are aliases for one another"),
+    allow_retry = TRUE))
+```
+
+**Aligning grids: `resample()`.** When two rasters cover the same area but have different
+grids, `resample()` recomputes one of them onto the other's grid so they can be stacked. This is
+the tool the raster-stacking breakout activity asks you to reach for.
+
+```{r resample-op, exercise=TRUE, exercise.eval = T, exercise.lines = 25, exercise.setup = "raster-file-read"}
+# a second raster of the same area "from a different source" - same extent and CRS,
+# but a different resolution, so it does NOT line up with elev
+other <- terra::rast(elev)
+terra::res(other) <- 0.01
+values(other) <- 1:ncell(other)
+
+# the two grids don't match
+res(elev)
+res(other)
+
+# so stacking fails
+try(c(elev, other))
+
+# resample 'other' onto elev's grid, using elev as the template
+other_aligned <- terra::resample(other, elev, method = "bilinear")
+
+# now the grids match and the rasters stack
+res(other_aligned)
+stk <- c(elev, other_aligned)
+stk
+```
+
+As with reprojection in the CRS tutorial, the `method` argument matters: use `"bilinear"` for
+continuous data (elevation, temperature) and `"near"` for categorical data (land cover), because
+averaging class codes produces values that correspond to no real class.
+
+### Exercise 8 - Converting between vector and raster
+
+The two data models aren't a one-way street: you will often need to turn vector data into a
+raster (or vice versa). `terra::rasterize()` takes vector features and "burns" them onto a
+raster grid defined by a template.
+
+A very common ecological use is turning point observations into a grid of *counts* - how many
+records fall in each cell. Note that this is **not** what `rasterize()` does by default.
+
+```{r rasterize-op, exercise=TRUE, exercise.eval = T, exercise.lines = 30, exercise.setup = "raster-file-read"}
+# make 200 random points inside the extent of elev
+set.seed(809)
+pts <- data.frame(x = runif(200, xmin(elev), xmax(elev)),
+                  y = runif(200, ymin(elev), ymax(elev)))
+
+# convert to a terra vector object (SpatVector)
+pts.v <- terra::vect(pts, geom = c("x", "y"), crs = crs(elev))
+
+# use a coarse template so several points land in the same cell
+tmpl <- terra::aggregate(elev, fact = 10)
+
+# DEFAULT: presence only - cells with any point get 1
+pts_presence <- terra::rasterize(pts.v, tmpl)
+
+# COUNT: how many points fall in each cell
+pts_count <- terra::rasterize(pts.v, tmpl, fun = "count")
+
+# compare the value ranges - this is how you tell them apart
+minmax(pts_presence)
+minmax(pts_count)
+
+# plot both
+par(mfrow=c(1,2))
+plot(pts_presence, main = "default: presence")
+plot(pts_count, main = 'fun = "count"')
+```
+
+You can also go the other direction, converting raster cells to vector features with
+`terra::as.points()` or `terra::as.polygons()`.
+
+```{r rast-to-vect, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "raster-file-read"}
+# coarsen first so we don't create thousands of polygons
+elev_coarse <- terra::aggregate(elev, fact = 20)
+
+# raster cells -> polygons
+elev_poly <- terra::as.polygons(elev_coarse)
+elev_poly
+
+plot(elev_poly, main = "raster cells as polygons")
+```
+
+```{r rasterize-quiz, echo=F}
+quiz(
+  question("Two occurrence records fall in the same grid cell. With a default `rasterize()` call (no `fun` argument), what value does that cell get?",
+    answer("2 - rasterize counts points by default"),
+    answer("1 - the default records presence, not a count", correct = TRUE),
+    answer("NA - overlapping points are dropped"),
+    allow_retry = TRUE),
+  question("How could you confirm from the output raster that you got counts rather than presence/absence?",
+    answer("Check that the raster has more than one layer"),
+    answer("Check the range of cell values - a count raster should have values above 1 where records are dense, while a presence raster is only 1 and NA", correct = TRUE),
+    answer("You can't tell from the raster; you have to re-run it"),
     allow_retry = TRUE))
 ```
 
