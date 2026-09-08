@@ -31,3 +31,16 @@ own machine.
 Some tutorials/exercises can be slow on older laptops. If something is taking too long to run
 locally, try: fewer iterations/simulations, a coarser raster resolution, or a smaller subset of
 the input data before re-running the exercise.
+
+## Maintainer note: bump the version on every push
+
+`remotes::install_github()` compares the installed `Version:` in `DESCRIPTION` against the one
+on GitHub and **silently skips the install if they match**. Students then think they have the
+latest tutorials when they don't.
+
+So: any push that changes a tutorial must also bump `Version:` in `DESCRIPTION` (e.g.
+`0.1.1` -> `0.1.2`). Same commit, every time.
+
+The alternative - telling students to run `install_github(..., force = TRUE)` - reinstalls
+unconditionally and works without a bump, but it also reinstalls on every run even when nothing
+has changed.
