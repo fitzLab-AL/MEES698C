@@ -3,6 +3,7 @@ title: "Advanced Spatial Data in R"
 output: 
   learnr::tutorial:
     progressive: true
+    allow_skip: true
 runtime: shiny_prerendered
 ---
   
@@ -16,7 +17,11 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 library(geodata)
 library(gradethis)
-knitr::opts_chunk$set(echo = FALSE)
+# 'hold' keeps all output after all code. Without it, knitr splits a pre-evaluated
+# exercise chunk's source at each point output is printed, and learnr's editor
+# concatenates those fragments with no newline - which welds them together
+# (e.g. "res(elev)res(elev_coarse)"). Mid-chunk warnings split it too.
+knitr::opts_chunk$set(echo = FALSE, results = 'hold', fig.show = 'hold')
 gradethis::gradethis_setup()
 tutorial_options(exercise.completion = FALSE)
 ```
