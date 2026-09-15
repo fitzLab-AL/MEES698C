@@ -18,6 +18,9 @@ Imports:
     tmap,
     rnaturalearth,
     rnaturalearthdata,
-    geodata
+    geodata,
+    gstat,
+    ncf,
+    kriging
 Remotes:
     rstudio/gradethis
