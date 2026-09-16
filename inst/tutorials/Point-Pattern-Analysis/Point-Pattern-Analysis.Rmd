@@ -1,0 +1,374 @@
+---
+title: "Spatial Point Pattern Analysis in R"
+output:
+  learnr::tutorial:
+    css: css/custom.css
+    progressive: true
+runtime: shiny_prerendered
+---
+  
+```{r setup, include=FALSE}
+library(learnr)
+library(spatstat)
+library(gradethis)
+# 'hold' keeps all output after all code. Without it, knitr splits a pre-evaluated
+# exercise chunk's source at each point output is printed, and learnr's editor
+# concatenates those fragments with no newline - which welds them together.
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, results = 'hold',
+                      fig.show = 'hold', exercise.lines = 15, fig.align = "center",
+                      fig.width = 7, fig.height = 7)
+gradethis::gradethis_setup()
+tutorial_options(exercise.completion = FALSE)
+```
+
+## Overview
+
+
+```{r graphic, echo=F, fig.width=5, fig.height=5}
+ipp <- rpoispp(function(x,y) {500 * (x^3+y^3)})
+plot(density(ipp), main="", legend=F)
+points(ipp, pch=20, col="white")
+```
+
+This tutorial introduces spatial point pattern analysis in R, an expansive and at times complex topic. We will cover the basics, including generating and analyzing point patterns, testing for spatial randomness, and examining evidence for interactions between points. The `spatstat` package is the go-to package for point-pattern analysis in R.
+
+## Exercise 1 - Complete spatial randomness
+
+Let's start with the simplest point pattern: complete spatial randomness (CSR). A homogeneous Poisson process is a point pattern where the points are distributed randomly and independently of each other. The *intensity* of a Poisson process is the expected number of points per unit area.
+
+But first, let's remind ourselves of the properties of the Poisson distribution. The Poisson distribution is a discrete probability distribution that expresses the probability of a given *number of events* occurring in a fixed interval of time or space. The Poisson distribution is characterized by a single parameter, *λ* (lambda), which is the average number of events in the interval. Ecological examples of phenomena that follow a Poisson distribution include the number of trees in a forest, the number of birds in a given area, or the number of fish caught in a lake.
+
+Let's make a histogram of a Poisson distribution with *λ* = 5.
+
+```{r poisson-histogram, exercise=TRUE, exercise.eval = T}
+# Generate 1000 draws from a Poisson distribution with lambda = 5
+set.seed(123)
+poisson_data <- rpois(1000, lambda = 5)
+
+# check the first few values
+head(poisson_data)
+
+# Create a histogram of the Poisson data
+hist(poisson_data, breaks = 10, col = "skyblue",
+     main = "Poisson Distribution (λ = 5)", 
+     xlab = "Number of Events")
+```
+
+Now that we have a basic understanding of the Poisson distribution, let's generate a CSR point pattern using the `rpoispp` function from the `spatstat` package. First, we need to define the intensity (*λ*) of the Poisson process. *The intensity is the expected number of points per unit area.* We will generate a 2D window of dimensions 100x100 and calculate the value of lambda to generate a Poisson point process with a mean of 500 points in this area.
+
+```{r csr-point-pattern-setup, exercise=TRUE, exercise.eval = T}
+# load libraries
+# library(spatstat)
+
+# Complete spatial randomness (CSR) or homogeneous Poisson process
+set.seed(698) 
+dims <- 100 # window size
+pts <- 500 # number of points
+(lambda <- pts/dims/dims)
+```
+
+```{r lambda-quiz}
+quiz(
+  question("What is lambda in the context of a Poisson process? Select all that apply.",
+    answer("Just another letter in the Greek alphabet."),
+    answer("The expected number of events per unit area.", correct = TRUE),
+    answer("The intensity of the Poisson point process.", correct = TRUE),
+    answer("The number of points in the analysis window.")
+  ))
+```
+
+Now, let's generate a CSR point pattern using the `rpoispp` function and visualize the point pattern. Note that we set `nsim = 1` to generate a single realization of the point pattern. Setting `nsim` to a large number can be used for null model testing. More on this later.
+
+```{r csr-point-pattern, exercise=TRUE, exercise.eval = T, exercise.setup = "csr-point-pattern-setup"}
+# generate a point pattern with csr using the rpoispp function
+csr <- rpoispp(lambda, 
+               win=owin(xrange=c(0,dims), yrange=c(0,dims)),
+               nsim=1) 
+
+# Let's look at the details of the csr object
+summary(csr)
+summary(csr)$intensity
+
+# plot the csr point-pattern
+plot(csr, pch=20)
+```
+
+Note that if we want an exact number of 'events', we can use the `runifpoint` function to generate a random uniform point pattern with a specified number of points - but it is most common to set lambda rather than specify an exact number of points.
+
+```{r csr-point-pattern-exact, exercise=TRUE, exercise.eval = T}
+csr.n <- runifpoint(1000) # gives n points exactly
+
+# summary of the csr.n object
+summary(csr.n)
+
+# plot the csr.n point-pattern
+plot(csr.n, pch=20)
+```
+
+Recall that for a point pattern to exhibit CSR, the intensity is constant across space. Now, let's make the intensity vary across space, creating an *inhomogeneous* Poisson process (IPP). Point patterns with non-stationary intensity have *first-order structure*. Instead of a constant value (i.e., n/A), lambda is now a function that varies the intensity across space.
+
+```{r ipp-point-pattern, exercise=TRUE, exercise.eval = T, exercise.setup = "csr-point-pattern"}
+# function to define the intensity of the IPP
+ipp.lambda <- function(x,y) {500 * (x^3+y^3)} 
+
+# Poisson process (ipp) -> First-order structure
+ipp <- rpoispp(ipp.lambda)
+
+# summary of the ipp object
+summary(ipp)
+
+# plot the ipp point-pattern
+plot(ipp, pch=20)
+```
+
+Let's do some simple analyses - namely quadrat counts - and also different visualizations of the IPP.
+
+```{r ipp-point-pattern-plot, exercise=TRUE, exercise.eval = T, exercise.setup = "ipp-point-pattern"}
+# plot the quadrat count for IPP
+plot(ipp, pch=20)
+plot(quadratcount(ipp), add=T)
+
+# plot the density with contours of the IPP point pattern
+#par(mfrow=c(1,2))
+plot(density(ipp))
+contour(density(ipp), add=T)
+
+# plot the CSR pattern for comparison
+#par(mfrow=c(1,2))
+plot(density(csr))
+contour(density(csr), add=T)
+```
+
+## Exercise 2 - Testing for spatial randomness
+
+Now that we have generated the CSR and IPP point patterns, let's test for spatial randomness using some common statistical tests.
+
+Quadrat count tests divide the study region into a grid of squares (quadrats) and count the number of points in each quadrat. The observed counts are compared to the expected counts under CSR. The Monte Carlo method is often used to assess the significance of the results.
+
+```{r spatial-randomness-quadrat, exercise=TRUE, exercise.eval = T, exercise.setup = "ipp-point-pattern"}
+# Quadrat count test - csr
+quadrat.test(csr, method="MonteCarlo", main="csr")
+
+# Quadrat count test - ipp
+quadrat.test(ipp, method="MonteCarlo", main="ipp")
+
+# plot the test graphics
+plot(quadrat.test(csr, method="MonteCarlo"), main="csr")
+plot(quadrat.test(ipp, method="MonteCarlo"), main="ipp")
+```
+
+The Kolmogorov-Smirnov (KS) test is another way to test for spatial randomness. It compares the cumulative distribution function (CDF) of the observed point pattern with the CDF of a CSR point pattern. If the two distributions are significantly different, the point pattern is not consistent with CSR.
+
+```{r spatial-randomness-ks, exercise=TRUE, exercise.eval = T, exercise.setup = "ipp-point-pattern"}
+cdf.test(csr, # point pattern
+         "x", # covariate - in this case, the 'x' coordinate
+         test="ks") # test to be performed ks = Kolmogorov-Smirnov
+cdf.test(ipp, "x", test="ks") # significant
+cdf.test(ipp, "y", test="ks") # significant
+
+plot(cdf.test(csr, "x"), main="K-S test, csr")
+plot(cdf.test(ipp, "x"), main="K-S test-x, ipp")
+plot(cdf.test(ipp, "y"), main="K-S test-y, ipp")
+```
+
+We also have several distance-based summary functions that describe the spatial structure of a point pattern. Each is a cumulative distribution over distance *r*, and each is compared with its expected value under CSR. The *empty space function* (F-function) uses distances from random locations in the window to the nearest point: it describes the size of the gaps in the pattern. The *nearest-neighbor distance function* (G-function) uses distances from each point to its nearest neighboring point. *Ripley's K-function* counts all points within distance *r* of a typical point, not only the nearest, so it summarizes the pattern across a range of distances at once.
+
+All three are *second-order* summaries: they describe how points are arranged relative to one another. None of them separates second-order structure from first-order structure, so a pattern whose intensity varies across the window (like `ipp`) will look "clustered" to all three even if the points do not interact. We return to this problem at the end of Exercise 3.
+
+We start by creating an additional point pattern with second-order structure to demonstrate these tests. Recall that second-order structure refers to the clustering or dispersion of points beyond what would be expected under CSR, as would be expected due to interactions between points. To accomplish this, we will generate a Thomas cluster process. A Thomas process is a type of cluster process formed by first generating a uniform Poisson point process of “parent” points with intensity kappa. Then each parent point is replaced by a random cluster of “offspring” points, the number of points per cluster being Poisson (mu) distributed. The offspring points are distributed in a circular disc centered at the parent point, with radius determined by the scale parameter. The resulting point pattern has intensity kappa*mu.
+
+```{r spatial-randomness-distance, exercise=TRUE, exercise.eval = T, exercise.setup = "ipp-point-pattern"}
+# Second-order structure
+set.seed(978)
+# kappa = intensity of cluster centers
+thom <- rThomas(kappa=30, 
+                scale=0.02, 
+                mu=10)
+
+# plot the Thomas process
+plot(thom, pch=20,  main="Thomas process with constant intensity")
+```
+
+Now, let's apply the F-function, G-function, and Ripley's K-function to the CSR and Thomas point patterns to test for spatial structure.
+
+The F-function, also known as the empty space function, measures the distribution of distances from random locations in the study area to the nearest point in the pattern. If the empirical F-function increases more slowly than the theoretical function for a random pattern, it suggests clustering (more empty space than expected). If the empirical F-function increases more quickly, it suggests dispersion (less empty space than expected).
+
+```{r spatial-randomness-Ftest, exercise=TRUE, exercise.eval = T, exercise.setup = "spatial-randomness-distance"}
+# F = Empty space function = point-to-nearest-event distribution
+print(Fest(csr, # point pattern
+     correction = "none")) # which edge correction to use?
+
+# F-function for the Thomas pattern
+print(Fest(thom, correction = "none"))
+
+# F-function for the csr pattern
+plot(csr)
+plot(Fest(csr, correction = "none"), main="F-test, csr")
+
+# F-function for the Thomas pattern
+plot(thom, pch=20)
+plot(Fest(thom, correction = "none"), main="F-test, 2nd-order") # departs from theoretical expectation
+```
+
+The G-function, also known as the nearest neighbor distance function, measures the distribution of distances between pairs of points (event-to-event). If the empirical G-function increases more quickly than the theoretical function for a random pattern, it suggests clustering. If it increases more slowly, it suggests dispersion. In this sense it is similar to the F-function, but the G-Function is based on pairs of points and describes clustering or dispersion of points at different scales rather than points and random locations. In contrast the F-function is based on random locations and describes the size of gaps or empty spaces in the pattern. 
+
+```{r spatial-randomness-Gtest, exercise=TRUE, exercise.eval = T, exercise.setup = "spatial-randomness-distance"}
+# G = Nearest Neighbor Distance function = event-to-event distribution
+# plot the G-function for CSR and Thomas point patterns
+
+# plot the G-function for CSR
+plot(Gest(csr, correction = "none"), main="G-test, 2nd-order")
+
+# plot the G-function for Thomas point pattern
+plot(Gest(thom, correction = "none"), main="G-test, 2nd-order")
+```
+
+Ripley's K-function measures the expected number of points within distance *r* of a typical point, divided by the intensity, and does so across a range of distances. Under CSR, K(*r*) = π*r*². The K-function is cumulative, meaning it counts all points up to a given distance, not only the nearest. Values above the theoretical line indicate clustering and values below indicate dispersion. Because the G-function stops at the nearest neighbor, it describes the immediate neighborhood of each point; the K-function describes the pattern at larger distances as well. Used together, the two give a more complete picture than either alone.
+
+All of these functions are affected by the edges of the window: a point near the edge has neighbors outside the window that were never recorded, so its counts are too low. We have used `correction = "none"` so far to show the raw estimate. In practice you should use an edge correction - `correction = "best"` selects the recommended one for each function - and the K-function is the most sensitive to this choice, especially at larger distances.
+
+```{r spatial-randomness-Ktest, exercise=TRUE, exercise.eval = T, exercise.setup = "spatial-randomness-distance"}
+# plot the K-function for CSR 
+plot(Kest(csr, correction = "none"), main="K-test, csr")
+
+# plot the K-function for the ipp pattern (note: this one uses the default edge corrections)
+plot(Kest(ipp), main="K-function, ipp")
+
+# plot the K-function for Thomas point pattern
+plot(Kest(thom, correction = "none"), main="K-test, 2nd-order")
+```
+
+## Exercise 3 - Envelope tests
+
+Up to this point, our analyses have been exploratory and we haven't formally considered whether the departure of a point pattern from CSR is statistically significant. One way to test for statistical significance is to use null model simulations to generate many realizations of a CSR point pattern, followed by calculation of the test statistic for each realization. This is known as a Monte Carlo approach. The envelope represents the range of values that would be expected under CSR. If the observed value falls outside the range of simulated values, it suggests that the pattern is significantly different from CSR.
+
+In R, we can use the `envelope` function to generate envelopes for the F-function, G-function, and K-function tests. Let's apply envelope tests to the CSR, IPP, and Thomas point patterns to test for statistical significance.
+
+Note that the number of simulations (nsim) should be large enough to provide a reliable estimate of the envelope. In the `envelope` function, the argument `nrank` determines the alpha for the simulations. The default value of `nrank` is 1, which corresponds to a significance level of 0.05. The alpha value can be calculated as `alpha = 2 * nrank / (1 + nsim)`.
+
+```{r spatial-randomness-envelope, exercise=TRUE, exercise.eval = T, exercise.setup = "spatial-randomness-distance"}
+# default value of nrank
+nrank <- 1
+
+# number of simulations
+nsim <- 99
+
+# calculate alpha
+(alpha <- 2 * nrank / (1 + nsim))
+
+# perform simulations and generate envelopes 
+
+# CSR point pattern
+env.csr <- envelope(csr, Kest, nsim=nsim, nrank=nrank) 
+plot(env.csr, main="K-test, csr with envelope")
+
+# Second-order structure
+env.thom <- envelope(thom, Kest, nsim=99, nrank=1)
+plot(env.thom, main="K-test, 2nd-order with envelope")
+```
+
+Let's explore some additional datasets and apply the envelope tests to them to test for statistical significance. We will use the `cells` and `redwood` datasets, which exhibit significant dispersion and clustering, respectively.
+
+```{r spatial-randomness-envelope-datasets, exercise=TRUE, exercise.eval = T, exercise.setup = "spatial-randomness-distance"}
+# The cells dataset shows significant dispersion to distances of r~0.15
+plot(cells, pch=20)
+env.cells <- envelope(cells, Kest, nsim=99, nrank=1)
+plot(env.cells, main="K-test on cells with envelope")
+```
+
+```{r cells-quiz}
+quiz(
+  question("The range of simulated values is somewhat large - why might that be the case?",
+    answer("We needed to run more simulations."),
+    answer("The distances between the points are relatively large."),
+    answer("The pattern is significantly different from CSR, leading to a wide range of simulated values."),
+    answer("The sample size is small.", correct = TRUE)
+    ))
+```
+
+```{r spatial-randomness-envelope-redwood, exercise=TRUE, exercise.eval = T, exercise.setup = "spatial-randomness-distance"}
+### The redwood dataset shows significant clustering to distances of r~0.2
+plot(redwood, pch=20)
+plot(envelope(redwood, Kest, nsim=99, nrank=1), main="K-test on redwood with envelope")
+```
+
+Lastly, we may encounter point patterns with both *first- and second-order structure*. In such cases, we can use the `Kinhom` function to compute the inhomogeneous K-function, which is a generalization of Ripley's K-function for point patterns with inhomogeneous intensity. Let's generate a point pattern with both first- and second-order structure and apply the `Kinhom` function.
+
+```{r spatial-randomness-Kinhom, exercise=TRUE, exercise.eval = T, exercise.setup = "spatial-randomness-distance"}
+# generate a point pattern with both first- and second-order structure
+set.seed(983)
+kappa <- function(x,y) {50*exp(-5*x*y)} #intensity of cluster centers
+thom.ipp <- rThomas(kappa, scale=0.02, mu=10)
+plot(thom.ipp)
+plot(envelope(thom.ipp, Kinhom, nsim=99, correction="best"))
+```
+
+## Exercise 4 - Marked point patterns
+
+In ecological studies, point patterns are often associated with additional information or attributes known as *marks*. Marks can represent different species, sizes, disease status, alive or dead, or other characteristics of the points. 
+
+Just to get a sense of marked point patterns and ways to explore the data, we'll start by having a look at the `lansing` data set, which contains information on the locations of trees and their species.
+
+```{r marked-point-patterns, exercise=TRUE, exercise.eval = T}
+data(lansing)
+summary(lansing)
+plot(lansing)
+plot(split(lansing))
+plot(density(split(lansing)))
+```
+
+As for the other point patterns, we can simulate marked point patterns. Here we use the `rmpoispp` function. Let's generate marked point patterns with three types of points (A, B, C) and visualize it.
+
+```{r marked-point-patterns-simulation, exercise=TRUE, exercise.eval = T}
+set.seed(4321)
+par(mfrow=c(1,2))
+dat1 <- rmpoispp(100, types=c("A", "B", "C"))
+plot(dat1)
+
+# different number of points
+dat2 <- rmpoispp(c(100, 50, 20), types=c("A", "B", "C"))
+plot(dat2)
+```
+
+We can also compare point patterns with different marks using various summary functions. For example, the `Gcross` function provides an i-to-j test for each pair of types of points and thereby serves as an extension of the G-function for multitype point patterns. 
+
+```{r marked-point-patterns-comparison, exercise=TRUE, exercise.eval = T}
+plantAnts <- rmpoispp(500, types=c("Plant", "Ant"))
+plot(plantAnts)
+
+# summary functions
+# test from Ants to plants
+plot(Gcross(plantAnts, "Ant", "Plant"))
+```
+
+The `alltypes` function provides a summary of the point pattern for all possible cross-comparisons of the marks.
+
+```{r marked-point-patterns-summary, exercise=TRUE, exercise.eval = T, exercise.setup="marked-point-patterns-comparison"}
+plot(alltypes(plantAnts, "G"))
+```
+
+Let's have a look at a more complex example using the `ants` data set, which contains information on the locations of two species of ants, *Cataglyphis* and *Messor*. We can use the `Gdot` function to perform an i-to-any test. This data set also demonstrates that the data do not have to occupy a rectangular window.
+
+```{r marked-point-patterns-ants, exercise=TRUE, exercise.eval = T}
+data(ants)
+
+# plot the ants data set
+plot(ants)
+
+# perform an i-to-j test for the Messor ants
+plot(Gcross(ants, "Cataglyphis", "Messor")) 
+
+# all pairwise comparisons
+plot(alltypes(ants, "G"))
+
+# compare Messor to all points of any type
+plot(Gdot(ants, "Messor")) # i-to-any test
+```
+
+These tests can be applied to point patterns involving numerous marks to look at potential interactions between multiple species. Here we use the `lansing` data set, which contains information on the locations of trees from six species.
+
+```{r marked-point-patterns-lansing, exercise=TRUE, exercise.eval = T}
+data(lansing)
+plot(alltypes(lansing, "G"))
+plot(alltypes(lansing, "G", envelope = T))
+```
