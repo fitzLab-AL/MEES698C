@@ -2,6 +2,7 @@
 title: "Scale & Spatial Structure in Data"
 output:
   learnr::tutorial:
+    css: css/custom.css
     progressive: true
 runtime: shiny_prerendered
 ---

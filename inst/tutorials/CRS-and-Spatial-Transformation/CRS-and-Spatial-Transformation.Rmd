@@ -2,6 +2,7 @@
 title: "Coordinate Reference Systems and Spatial Transformation"
 output: 
   learnr::tutorial:
+    css: css/custom.css
     progressive: true
     allow_skip: true
 runtime: shiny_prerendered
