@@ -462,6 +462,19 @@ fitG2
 fitG5
 ```
 
+Plotted side by side on the same y-axis, the drop in the nugget and the sill with coarsening grain is obvious.
+
+```{r grain-plots, exercise=TRUE, exercise.lines = 12, exercise.eval = T, exercise.setup="grain-variograms", fig.align='center', fig.width=9, fig.height=3.5}
+# plot the three variograms with their fitted models on the same y-axis
+par(mfrow=c(1,3))
+plot(vgmG1$dist, vgmG1$gamma, xlim=c(0, 50), ylim=c(0, 12), main="grain = 1", xlab="distance", ylab="semivariance")
+lines(variogramLine(fitG1, maxdist=50))
+plot(vgmG2$dist, vgmG2$gamma, xlim=c(0, 50), ylim=c(0, 12), main="grain = 2", xlab="distance", ylab="semivariance")
+lines(variogramLine(fitG2, maxdist=50))
+plot(vgmG5$dist, vgmG5$gamma, xlim=c(0, 50), ylim=c(0, 12), main="grain = 5", xlab="distance", ylab="semivariance")
+lines(variogramLine(fitG5, maxdist=50))
+```
+
 **Write R code to perform the following tasks:**
 
 1. Aggregate `rastSim` by a factor of 10 (`fun="mean"`) and assign it to `rastSim10`.
