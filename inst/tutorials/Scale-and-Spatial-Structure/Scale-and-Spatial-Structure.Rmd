@@ -17,13 +17,17 @@ library(gstat)
 library(kriging)
 library(gradethis)
 library(ncf)
-knitr::opts_chunk$set(echo = FALSE)
+# 'hold' keeps all output after all code. Without it, knitr splits a pre-evaluated
+# exercise chunk's source at each point output is printed, and learnr's editor
+# concatenates those fragments with no newline - which welds them together
+# (e.g. "nsim=1)fine"). Mid-chunk warnings and messages split it too.
+knitr::opts_chunk$set(echo = FALSE, results = 'hold', fig.show = 'hold')
 gradethis::gradethis_setup()
 tutorial_options(exercise.completion = FALSE)
 ```
 
 
-## Scale & Spatial Structure in Data
+## Overview
 
 In this tutorial, we explore two statistical methods for describing spatial structure in data: correlograms and variograms. Both ask the same question — how similar are two observations as a function of the distance between them? — and both return the scale over which observations are spatially dependent. We then look at how the answer depends on the *grain* of the data, and finish with kriging, which uses the fitted variogram to interpolate between observations.
 
@@ -31,7 +35,7 @@ We use the `sf` and `terra` packages to work with spatial data and the `gstat` a
 
 To learn how to interpret the output of these methods, we use a technique that, once mastered, lets you learn almost any statistical approach: instead of analyzing real data, we generate data with *known* properties and then apply the method to see what it reports. Because we built the data ourselves, we know exactly what structure is in them, so we can see how the method behaves when it is handed data with no spatial pattern, a strong pattern, or a pattern that changes with distance. With real data we never know the truth, so this is the only way to learn what a method's output looks like when the answer is known — and to recognize when it is telling us something we did not expect.
 
-### Exercise 1 - Correlograms
+## Exercise 1 - Correlograms
 
 A correlogram plots the correlation between pairs of observations against the distance separating them. The correlation statistic is usually Moran's *I*, which runs from -1 (values at that distance are opposite) through 0 (no spatial structure) to 1 (values at that distance are identical). In this exercise we generate two rasters with different, known spatial patterns and then compare their correlograms. Think of the two rasters as two different ways a species' abundance could vary across its geographic range.
 
@@ -102,11 +106,12 @@ correlCent <- correlog(x=sampleCent$x,
 
 Before plotting, look at the `correlog` objects. `n` is the number of pairs in each distance class, `mean.of.class` the average distance within it, and `correlation` the value of Moran's *I*. A rule of thumb is that a class needs a few dozen pairs before its estimate is worth much. Notice how `n` falls off at the longest distances: with 100 points scattered over a square, there are many pairs a moderate distance apart and very few at the corners of the extent.
 
-```{r correlogram-results, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup="correlogram-create"}
+```{r correlogram-results-lin, exercise=TRUE, exercise.lines = 5, exercise.eval = T, exercise.setup="correlogram-create"}
 # print the results for the linear trend raster
 correlLin
+```
 
-#
+```{r correlogram-results-cent, exercise=TRUE, exercise.lines = 5, exercise.eval = T, exercise.setup="correlogram-create"}
 # print the results for the center high raster
 correlCent
 ```
@@ -150,7 +155,7 @@ quiz(
     allow_retry = TRUE))
 ```
 
-#### The increment is a scale decision
+### The increment is a scale decision
 
 The increment controls the lag of the analysis. Too small, and each class holds few pairs and the correlogram is noisy; too large, and the classes average across the structure you are trying to see. A rule of thumb is to divide the maximum distance between points by 10 to 20.
 
@@ -181,7 +186,7 @@ grade_code()
 
 With `increment = 2` the correlogram has dozens of classes, most with a handful of pairs, and the line wobbles. With `increment = 30` there are only four or five classes and the negative dip is reduced to one point. Neither is wrong; each shows the same pattern at a different lag. The maximum distance between two points in a 100 x 100 square is about 140, so an increment of 7 to 14 follows the rule of thumb, which is why 10 works well above.
 
-#### Regular versus random sampling
+### Regular versus random sampling
 
 Correlograms assume the sampling locations are roughly evenly spaced. Random samples violate that mildly: some pairs fall much closer together than the typical spacing, which inflates the first distance class. `spatSample()` can draw a regular grid instead.
 
@@ -207,9 +212,9 @@ grade_code()
 
 The regular grid gives the same high-low-high shape, and the estimates are steadier because every distance class is populated evenly. The first class no longer contains pairs closer than the grid spacing, so the shortest-lag correlation is slightly lower than it was for the random sample.
 
-### Exercise 2 - Variograms
+## Exercise 2 - Variograms
 
-A variogram is the mirror image of a correlogram: instead of the correlation between pairs at each distance, it plots their *dissimilarity*, the semivariance, which rises with distance when observations are spatially dependent. In this exercise we use the `meuse.all` data set from the `gstat` package, which records heavy-metal concentrations at 164 sites on a floodplain. We compute an empirical variogram, fit a theoretical model to it, and read the parameters that describe the spatial structure.
+A variogram is the mirror image of a correlogram: instead of the correlation between pairs at each distance, it plots their *dissimilarity*, the semivariance, which rises with distance when observations are spatially dependent. Now that we know what a correlogram does with data of known pattern, we turn to a real data set to learn what a variogram looks like in practice. We use the `meuse.all` data set from the `gstat` package, which records heavy-metal concentrations at 164 sites on a floodplain. We compute an empirical variogram, fit a theoretical model to it, and read the parameters that describe the spatial structure.
 
 ```{r meuse-data, exercise=TRUE, exercise.lines = 15, exercise.eval = T, fig.align='center', fig.width=8}
 # load the data into the environment
@@ -243,7 +248,7 @@ zincVgm
 plot(zincVgm, pch=20, col="blue", cex=2)
 ```
 
-#### Cutoff and width
+### Cutoff and width
 
 Two arguments to `variogram()` set the lags, just as `increment` did for the correlogram. `width` is the width of each distance class. `cutoff` is the largest distance considered, and by default it is one third of the diagonal of the bounding box around the points. The default is a sensible guess, but it is a guess: if the semivariance is still rising at the cutoff, the variogram has not reached its plateau and any model fitted to it will report a range it never observed. The fix is to raise `cutoff` until the plateau appears, and to check that any fitted range is smaller than the largest distance in the data.
 
@@ -258,7 +263,7 @@ plot(zincVgmShort, pch=20, col="blue", cex=2, main="cutoff = 800, width = 50")
 
 The shorter cutoff shows the rise in detail but stops before the plateau, so it tells you where dependence *starts* to weaken but not where it ends. Neither view is wrong; you choose the cutoff to answer the question at hand.
 
-#### Fitting a theoretical model
+### Fitting a theoretical model
 
 A theoretical variogram is a smooth function fitted to the empirical points. It has three parameters, and they are the vocabulary of spatial dependence:
 
@@ -288,7 +293,9 @@ model.sph
 plot(zincVgm, model=model.sph)
 ```
 
-Read the printed model as follows. The `Nug` row's `psill` is the nugget. The `Sph` row's `psill` is the *partial* sill, the rise above the nugget, so the sill is the sum of the two `psill` values. The `Sph` row's `range` is the range, in the units of the coordinates (metres here). So for these data the nugget is about 0.12, the sill about 0.65, and the range about 880 m: two zinc measurements more than roughly 900 m apart are effectively independent.
+Read the printed model as follows. `fit.variogram()` returns a small table with one row per component of the model. The `Nug` row is the nugget: its `psill` (0.12) is the semivariance at distance zero — the variation between two points that are essentially on top of each other, from measurement error and from spatial structure at scales finer than the sampling. Its `range` is 0 by definition. The `Sph` row is the spherical part: its `psill` (0.52) is the *partial* sill, the amount the semivariance rises above the nugget before levelling off. The total **sill** is the sum of the two `psill` values, 0.12 + 0.52 ≈ 0.65, and matches the height where the fitted curve flattens in the plot. The `Sph` row's `range` (≈ 880) is the distance at which the curve reaches the sill, in the units of the coordinates (metres here).
+
+Putting it together: for these data the nugget is about 0.12, the sill about 0.65, and the range about 880 m. Two zinc measurements more than roughly 900 m apart are effectively independent; closer than that, they are correlated, and the closer they are the more alike they tend to be. The nugget-to-sill ratio (0.12 / 0.65 ≈ 0.19) tells you that about a fifth of the variance is unexplained at any distance, and the remaining four fifths is spatially structured.
 
 **Write R code to perform the following tasks:**
 
@@ -343,7 +350,7 @@ model.best <- fit.variogram(zincVgm, vmod.best)
 model.best
 ```
 
-#### Relaxing stationarity: a trend
+### Relaxing stationarity: a trend
 
 What if the mean is *not* constant across the area? The zinc concentrations are highest near the river and fall away from it, which is a large-scale trend, not spatial dependence in the sense the variogram is meant to capture. We can remove a linear trend by supplying the coordinates as predictors. The variogram is then computed on the residuals from that trend.
 
@@ -373,7 +380,7 @@ plot(zincVgmTrend, model=model.sphTrend)
 
 Removing the trend lowers the sill, because part of what looked like spatial dependence was the trend. What remains is the dependence *within* the trend. A linear trend is the simplest choice and only partly removes a curved one, so this is a first step, not a cure.
 
-#### Direction: anisotropy
+### Direction: anisotropy
 
 So far we have assumed the pattern is the same in every direction (isotropy). If we suspect it is not, we can compute the variogram separately for pairs oriented in different directions with the `alpha` argument (degrees clockwise from north). The usual set is 0, 45, 90, and 135 degrees, each with a window of plus or minus 22.5 degrees; there is no need to go further because a variogram is symmetric about 180 degrees.
 
@@ -387,10 +394,10 @@ plot(vgmAniso)
 
 ```{r aniso-quiz, echo=F}
 quiz(
-  question("If the four directional variograms had the same shape, sill, and range, the pattern would be called",
+  question("If the four directional variograms had a different shape, sill, and range, the pattern would be called",
     answer("stationary."),
-    answer("isotropic.", correct = TRUE),
-    answer("anisotropic."),
+    answer("isotropic."),
+    answer("anisotropic.", correct = TRUE),
     allow_retry = TRUE),
   question("A directional variogram rises to a peak and then falls at longer distances. What does that shape suggest?",
     answer("The fit failed at long distances."),
@@ -399,9 +406,9 @@ quiz(
     allow_retry = TRUE))
 ```
 
-### Exercise 3 - Grain
+## Exercise 3 - Grain
 
-Lag is one scale decision; grain is another. Grain is the resolution of the data themselves: the cell size of a raster or the plot size of a survey. Coarsening the grain averages away everything smaller than the new cell. To see what that does to a variogram we need data whose structure we know exactly, so this time we *simulate* a spatial pattern rather than drawing one. `gstat` can generate a random field from a variogram model, which is the reverse of fitting one: we specify the nugget, sill, and range, and it produces a surface with that structure.
+Lag is one scale decision; grain is another. Grain is the resolution of the data themselves: the cell size of a raster or the plot size of a survey. Coarsening the grain averages away everything smaller than the new cell. To see what that does to a variogram we need data whose structure we know exactly. In Exercise 1 we built rasters by hand from simple formulas; here we go one step further and generate a random field directly from a variogram model. `gstat` can do this, and it is the reverse of fitting: we specify the nugget, sill, and range, and it produces a surface with that structure.
 
 We build the surface from two components. A **broad** component has a spherical variogram with a range of 30 units, and a **fine** component has a range of only 3 units. Their sum has structure at two scales, like a species whose abundance varies smoothly across its range and also patchily from site to site.
 
@@ -498,7 +505,7 @@ quiz(
     allow_retry = TRUE))
 ```
 
-### Exercise 4 - Kriging
+## Exercise 4 - Kriging
 
 In addition to *explanation*, variograms serve *prediction*: the fitted model describes how similar nearby values are, and that is exactly what is needed to interpolate between observations. The method is called kriging. It estimates the value at an unobserved location as a weighted average of nearby observations, with weights taken from the variogram model. In this exercise we krige a simulated habitat variable.
 
