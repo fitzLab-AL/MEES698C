@@ -423,6 +423,49 @@ plot(alltypes(ants, "G"))
 plot(Gdot(ants, "Messor")) # i-to-any test
 ```
 
+### Which null model?
+
+A cross-type summary function such as `Gcross` describes how close type *i* points are to type *j* points, but the envelope only means something in relation to the null model that generated it, and for marked patterns there is more than one sensible null. The default in `envelope` simulates complete spatial randomness for every type, which tests whether there is any structure at all - clustering within a species would reject it just as well as an interaction between species. Two alternatives isolate the question of interaction:
+
+- **Independence.** Keep each species' own pattern intact but shift one species' points as a block to a random position (a *toroidal shift* when the window is rectangular). This preserves within-species clustering and asks: given how each species is arranged on its own, are the two arranged independently of each other? It is the right null when each species' pattern was formed separately (for example, dispersal and establishment) and the question is whether they then interact.
+- **Random labelling.** Keep every location fixed and shuffle the species labels among them (`rlabel`). This asks: given where the points are, is which species occupies each one random? It is the right null when the locations came first and the labels were assigned afterward (for example, trees that became infected, or nests that survived).
+
+The two nulls answer different ecological questions and can give different answers for the same data. The `ants` window is a polygon, so we cannot use a toroidal shift; `rshift` with `edge = "erode"` shifts one species and trims the window instead.
+
+```{r marked-null-models, exercise=TRUE, exercise.eval = T, exercise.setup = "marked-point-patterns-ants", exercise.lines = 20, fig.width=9, fig.height=3.5}
+par(mfrow=c(1,3))
+set.seed(31)
+
+# default null: CSR for each species separately
+env.csr <- envelope(ants, Gcross, i="Cataglyphis", j="Messor", nsim=99,
+                    correction="best", verbose=FALSE)
+plot(env.csr, main="Null: CSR, each species", legend=FALSE)
+
+# independence null: shift the Cataglyphis nests as a block
+env.ind <- envelope(ants, Gcross, i="Cataglyphis", j="Messor", nsim=99,
+                    correction="best", verbose=FALSE,
+                    simulate=expression(rshift(ants, which="Cataglyphis", edge="erode", radius=100)))
+plot(env.ind, main="Null: independence", legend=FALSE)
+
+# random labelling null: keep the nests, shuffle the species labels
+env.lab <- envelope(ants, Gcross, i="Cataglyphis", j="Messor", nsim=99,
+                    correction="best", verbose=FALSE,
+                    simulate=expression(rlabel(ants)))
+plot(env.lab, main="Null: random labelling", legend=FALSE)
+```
+
+```{r null-quiz}
+quiz(
+  question("Under random labelling, the observed G from Cataglyphis to Messor rises above the envelope beyond r ~ 25, but under the independence null it stays inside. What is the correct reading?",
+    answer("The data are inconsistent; one of the tests must be wrong."),
+    answer("Given where nests are, Cataglyphis nests are closer to Messor nests than a random assignment of species to nest sites would produce; but given each species' own spatial arrangement, the two arrangements are consistent with independence. The two nulls ask different questions.", correct = TRUE),
+    answer("Random labelling is always the more powerful test, so the species interact."),
+    answer("The independence null is always the more appropriate test, so the species do not interact.")
+    ))
+```
+
+Whichever null you choose, state it. In coding assignment 4 you will be asked to interpret cross-type G-functions for four tree species; the interpretation depends on which of these nulls the envelope was built from.
+
 These tests can be applied to point patterns involving numerous marks to look at potential interactions between multiple species. Here we use the `lansing` data set, which contains information on the locations of trees from six species.
 
 ```{r marked-point-patterns-lansing, exercise=TRUE, exercise.eval = T}
