@@ -29,7 +29,7 @@ In this tutorial, we explore two statistical methods for describing spatial stru
 
 We use the `sf` and `terra` packages to work with spatial data and the `gstat` and `ncf` packages to analyze spatial structure. The `kriging` package handles the interpolation in the last exercise.
 
-To learn how to interpret the output of these methods, we use a technique that, once mastered, lets you learn almost any statistical approach: instead of analyzing real data, we generate data with *known* properties and then apply the method to see what it reports.
+To learn how to interpret the output of these methods, we use a technique that, once mastered, lets you learn almost any statistical approach: instead of analyzing real data, we generate data with *known* properties and then apply the method to see what it reports. Because we built the data ourselves, we know exactly what structure is in them, so we can see how the method behaves when it is handed data with no spatial pattern, a strong pattern, or a pattern that changes with distance. With real data we never know the truth, so this is the only way to learn what a method's output looks like when the answer is known — and to recognize when it is telling us something we did not expect.
 
 ### Exercise 1 - Correlograms
 
