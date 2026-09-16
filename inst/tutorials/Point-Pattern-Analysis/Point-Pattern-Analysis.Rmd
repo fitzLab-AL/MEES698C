@@ -251,6 +251,31 @@ plot(Lest(csr, correction = "best"), . - r ~ r, main="L-function, csr")
 plot(Lest(thom, correction = "best"), . - r ~ r, main="L-function, 2nd-order")
 ```
 
+### The pair correlation function
+
+K and L are cumulative: K(*r*) counts every pair of points closer than *r*. So once clustering appears at a short distance, K and L stay elevated at every larger distance, even if the points do not interact at those distances. That makes it hard to say *at what distance* the clustering occurs. The *pair correlation function* g(*r*) is the non-cumulative alternative: it uses only the pairs separated by a distance close to *r*, so it is the derivative of K with respect to distance, standardized so that g(*r*) = 1 under CSR. Values above 1 indicate more pairs at that distance than expected (clustering), and values below 1 fewer pairs (inhibition). Because it is a density rather than a count, g(*r*) is noisy at very short distances where few pairs exist.
+
+The Thomas pattern was generated with `scale = 0.02`, the standard deviation of the offspring displacement from each parent, so most clustering should occur within roughly two to three times that distance. Compare how clearly each function reports that.
+
+```{r spatial-randomness-pcf, exercise=TRUE, exercise.eval = T, exercise.setup = "spatial-randomness-distance", fig.width=8, fig.height=4}
+par(mfrow=c(1,2))
+# cumulative: L-function for the Thomas pattern
+plot(Lest(thom, correction = "best"), . - r ~ r, main="L-function, 2nd-order")
+
+# non-cumulative: pair correlation function for the Thomas pattern
+plot(pcf(thom), main="Pair correlation function, 2nd-order", ylim=c(0, 10))
+```
+
+```{r pcf-quiz}
+quiz(
+  question("Which plot identifies the distance beyond which points in the Thomas pattern no longer cluster, and why?",
+    answer("The L-function, because it stays above zero out to r ~ 0.2, so clustering extends to 0.2."),
+    answer("The pair correlation function, because g(r) returns to 1 near r ~ 0.08, whereas L(r) - r stays elevated because it accumulates all the pairs closer than r.", correct = TRUE),
+    answer("Both plots give the same answer because both are derived from K(r)."),
+    answer("Neither, because the cluster scale can only be recovered by fitting a cluster process model.")
+    ))
+```
+
 ## Exercise 3 - Envelope tests
 
 Up to this point, our analyses have been exploratory and we haven't formally considered whether the departure of a point pattern from CSR is statistically significant. One way to test for statistical significance is to use null model simulations to generate many realizations of a CSR point pattern, followed by calculation of the test statistic for each realization. This is known as a Monte Carlo approach. The envelope represents the range of values that would be expected under CSR. If the observed value falls outside the range of simulated values, it suggests that the pattern is significantly different from CSR.
