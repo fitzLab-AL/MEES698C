@@ -473,3 +473,59 @@ data(lansing)
 plot(alltypes(lansing, "G"))
 plot(alltypes(lansing, "G", envelope = T))
 ```
+## Exercise 5 - Modeling intensity
+
+So far we have described first-order structure (the quadrat and KS tests, `density`) and tested for it, but not explained it. A *point process model* fits the intensity as a function of covariates, in the same way a generalized linear model fits a count response: the log of the intensity is a linear function of the predictors. This is the point-pattern analogue of the regression models used elsewhere in this course, and it lets us ask whether an environmental gradient accounts for the pattern, and what is left over once it does.
+
+We use the `bei` data set: 3,604 trees of *Beilschmiedia pendula* in a 1,000 × 500 m plot on Barro Colorado Island, Panama, with two covariates supplied as pixel images in `bei.extra`: elevation (`elev`) and slope (`grad`).
+
+```{r ppm-data, exercise=TRUE, exercise.eval = T, fig.width=9, fig.height=5}
+data(bei)
+par(mfrow=c(2,2), mar=c(1,1,2,1))
+plot(bei, pch=20, cex=0.4, main="Beilschmiedia pendula")
+plot(density(bei), main="observed density")
+plot(bei.extra$elev, main="elevation (m)")
+plot(bei.extra$grad, main="slope")
+```
+
+`ppm` fits the model. A formula with only an intercept fits a homogeneous Poisson process (CSR); adding covariates fits an inhomogeneous Poisson process whose intensity varies with them. The covariates are passed as a list of images in `data`, and the two models are compared with a likelihood ratio test or AIC, as for any GLM.
+
+```{r ppm-fit, exercise=TRUE, exercise.eval = T, exercise.setup = "ppm-data", exercise.lines = 20, fig.width=9, fig.height=2.5}
+# homogeneous Poisson process (CSR)
+fit0 <- ppm(bei ~ 1)
+
+# inhomogeneous Poisson process: log intensity depends on elevation and slope
+fit1 <- ppm(bei ~ elev + grad, data = bei.extra)
+fit1
+
+# compare the two models
+anova(fit0, fit1, test = "LRT")
+AIC(fit0); AIC(fit1)
+
+# fitted intensity next to the observed density
+par(mfrow=c(1,2), mar=c(1,1,2,1))
+plot(density(bei), main="observed density")
+plot(predict(fit1), main="fitted intensity")
+```
+
+Both coefficients are positive: the trees are more common at higher elevation and, much more strongly, on steeper slopes. The fitted intensity reproduces the ridge of high density along the steep ground in the southeast but not the two large patches in the northwest and south, which lie on gentle terrain. Something else is generating those.
+
+A fitted `ppm` object can be used as the null model in `envelope`, which simulates from the fitted inhomogeneous process rather than from CSR. If the covariates fully explained the pattern, the observed inhomogeneous L-function would fall inside this envelope.
+
+```{r ppm-envelope, exercise=TRUE, exercise.eval = T, exercise.setup = "ppm-fit", fig.width=6, fig.height=5}
+set.seed(2)
+env.fit <- envelope(fit1, Linhom, nsim=39, correction="best", verbose=FALSE)
+plot(env.fit, . - r ~ r, main="Inhomogeneous L, null = fitted model")
+```
+
+```{r ppm-quiz}
+quiz(
+  question("The observed curve rises far above the envelope out to r ~ 70 m even though the null model already includes elevation and slope. What does this show?",
+    answer("The model is wrong; elevation and slope do not affect the trees."),
+    answer("After accounting for elevation and slope, the trees are still clustered at distances up to ~70 m, so the covariates explain some first-order structure but not the second-order structure. Dispersal, other unmeasured covariates, or both remain as candidate explanations.", correct = TRUE),
+    answer("The envelope is too narrow because too few simulations were run."),
+    answer("The trees are dispersed, not clustered, once the covariates are included.")
+    ))
+```
+
+A Poisson process model can only ever describe first-order structure; to model clustering as well, `kppm` fits a cluster process (Thomas or Matérn) with the same covariate formula, and the Fletcher & Fortin text (Section 4.3.7) shows a Thomas process used as an alternative null. We stop here, but the same logic applies: choose the null that encodes what you already know, and read the departure from it.
