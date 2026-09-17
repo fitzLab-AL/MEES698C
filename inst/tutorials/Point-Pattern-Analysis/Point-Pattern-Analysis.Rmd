@@ -438,7 +438,7 @@ quiz(
 
 Whichever null you choose, state it. In coding assignment 4 you will be asked to interpret cross-type G-functions for four tree species; the interpretation depends on which of these nulls the envelope was built from.
 
-These tests can be applied to point patterns involving numerous marks to look at potential interactions between multiple species. Here we use the `lansing` data set, which contains information on the locations of trees from six species.
+These tests can be applied to point patterns involving numerous marks to look at potential interactions between multiple species. Here we use the `lansing` data set, which contains information on the locations of trees from six species. The envelopes below use the default null model, complete spatial randomness for each species; the previous subsection shows how to substitute an independence or random-labelling null with the `simulate` argument.
 
 ```{r marked-point-patterns-lansing, exercise=TRUE, exercise.eval = T}
 data(lansing)
