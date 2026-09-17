@@ -375,37 +375,9 @@ plot(split(lansing))
 plot(density(split(lansing)))
 ```
 
-As for the other point patterns, we can simulate marked point patterns. Here we use the `rmpoispp` function. Let's generate marked point patterns with three types of points (A, B, C) and visualize it.
+Marked patterns can be simulated as well (`rmpoispp` generates a Poisson pattern with a given intensity for each type), but here we move straight to real data.
 
-```{r marked-point-patterns-simulation, exercise=TRUE, exercise.eval = T}
-set.seed(4321)
-par(mfrow=c(1,2))
-dat1 <- rmpoispp(100, types=c("A", "B", "C"))
-plot(dat1)
-
-# different number of points
-dat2 <- rmpoispp(c(100, 50, 20), types=c("A", "B", "C"))
-plot(dat2)
-```
-
-We can also compare point patterns with different marks using various summary functions. For example, the `Gcross` function provides an i-to-j test for each pair of types of points and thereby serves as an extension of the G-function for multitype point patterns. 
-
-```{r marked-point-patterns-comparison, exercise=TRUE, exercise.eval = T}
-plantAnts <- rmpoispp(500, types=c("Plant", "Ant"))
-plot(plantAnts)
-
-# summary functions
-# test from Ants to plants
-plot(Gcross(plantAnts, "Ant", "Plant"))
-```
-
-The `alltypes` function provides a summary of the point pattern for all possible cross-comparisons of the marks.
-
-```{r marked-point-patterns-summary, exercise=TRUE, exercise.eval = T, exercise.setup="marked-point-patterns-comparison"}
-plot(alltypes(plantAnts, "G"))
-```
-
-Let's have a look at a more complex example using the `ants` data set, which contains information on the locations of two species of ants, *Cataglyphis* and *Messor*. We can use the `Gdot` function to perform an i-to-any test. This data set also demonstrates that the data do not have to occupy a rectangular window.
+The summary functions extend to marked patterns by comparing types. `Gcross` computes the G-function from points of type *i* to points of type *j* (an i-to-j test), `Gdot` from points of type *i* to points of any type (an i-to-any test), and `alltypes` computes a chosen function for every pair of types at once. We apply them to the `ants` data set, which contains the nest locations of two species of ants, *Cataglyphis* and *Messor*. This data set also demonstrates that the data do not have to occupy a rectangular window.
 
 ```{r marked-point-patterns-ants, exercise=TRUE, exercise.eval = T}
 data(ants)
