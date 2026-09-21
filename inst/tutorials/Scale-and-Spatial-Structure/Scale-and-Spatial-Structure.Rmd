@@ -74,7 +74,7 @@ Next, we draw random samples from both rasters, as if a field campaign had measu
 
 ```{r raster-samples, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup="raster-setup", fig.align='center', fig.width=8}
 # generate random sample points from the rasters
-set.seed(42)
+set.seed(421)
 sampleLin <- spatSample(rastLin, size=100, method="random", xy=TRUE)
 sampleCent <- spatSample(rastCent, size=100, method="random", xy=TRUE)
 
@@ -84,6 +84,13 @@ plot(rastLin, main="Linear Trend")
 points(sampleLin$x, sampleLin$y, pch=21, col="gray10", cex=sampleLin$lyr.1/3)
 plot(rastCent, main="High Values in Center")
 points(sampleCent$x, sampleCent$y, pch=21, col="gray10", cex=sampleCent$lyr.1/3)
+```
+
+Before computing anything, look at the structure of the sample data. Each row is one sample point, with its `x` and `y` coordinates and the raster value at that location (`lyr.1`). These three columns are what the correlogram function needs.
+
+```{r sample-structure, exercise=TRUE, exercise.lines = 5, exercise.eval = T, exercise.setup="raster-samples"}
+# first few rows of the linear trend sample
+head(sampleLin)
 ```
 
 Now we compute correlograms for the two samples with `ncf::correlog()`. The function takes the x and y coordinates of the observations, the variable of interest, and the distance `increment`, which sets the width of the distance classes within which Moran's *I* is calculated. Every pair of points is assigned to one class by the distance between them, and one value of *I* is computed per class. The increment is therefore the *lag* of the analysis: it decides which distances you can see.
@@ -116,6 +123,15 @@ correlLin
 correlCent
 ```
 
+```{r correlogram-n-quiz, echo=F}
+quiz(
+  question("Looking at the printed `correlog` objects, where are the distance classes with the fewest pairs?",
+    answer("At the shortest distances."),
+    answer("At the longest distances.", correct = TRUE),
+    answer("In the middle of the range of distances."),
+    allow_retry = TRUE))
+```
+
 Now plot the correlograms beside the rasters that produced them.
 
 ```{r correlogram-plot, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup="correlogram-create", fig.align='center', fig.width=8, fig.height=8}
@@ -132,26 +148,21 @@ abline(h=0, col="red")
 The two correlograms have different shapes, and the shapes are diagnostic.
 
 - **Linear trend.** Moran's *I* starts high, falls steadily, crosses zero, and keeps falling. Points a short distance apart have similar values; points at opposite ends of the gradient have opposite values relative to the mean. The correlation never comes back up because there is no distance at which two points on a straight gradient become similar again.
-- **High centre.** Moran's *I* starts high, falls below zero at intermediate distances, and then *rises again* at the longest distances. Negative *I* at intermediate lags means that pairs at that separation tend to sit on opposite sides of the mean: one near the centre (high), the other near an edge (low). At the longest lags the only pairs left are edge-to-edge, both low, so they are similar again. This high-low-high shape is the signature of a single peak, or "bull's-eye", pattern. Keep it in mind: a species whose abundance peaks at the centre of its range and declines toward the edges produces exactly this correlogram.
+- **High center.** Moran's *I* starts high, falls below zero at intermediate distances, and then *rises again* at the longest distances. Negative *I* at intermediate lags means that pairs at that separation tend to sit on opposite sides of the mean: one near the center (high), the other near an edge (low). At the longest lags the only pairs left are edge-to-edge, both low, so they are similar again. This high-low-high shape is the signature of a single peak, or "bull's-eye", pattern. Keep it in mind: a species whose abundance peaks at the center of its range and declines toward the edges produces exactly this correlogram.
 
 Negative autocorrelation is therefore not an error or an oddity. It tells you the pattern has a characteristic size: the distance at which *I* first crosses zero is roughly the radius of the patch.
 
 ```{r correlogram-quiz, echo=F}
 quiz(
-  question("For the high-centre raster, what does a negative value of Moran's I at intermediate distances mean?",
+  question("For the high-center raster, what does a negative value of Moran's I at intermediate distances mean?",
     answer("There is no spatial structure at those distances."),
     answer("Pairs of points separated by those distances tend to have values on opposite sides of the mean.", correct = TRUE),
     answer("The sample size is too small at those distances."),
     allow_retry = TRUE),
-  question("Why does Moran's I rise again at the longest distances for the high-centre raster but not for the linear trend?",
-    answer("There are more pairs at long distances for the high-centre raster."),
-    answer("The longest pairs on the high-centre raster are edge-to-edge and both low, so they are similar; the longest pairs on the linear trend are at opposite ends of the gradient and remain opposite.", correct = TRUE),
+  question("Why does Moran's I rise again at the longest distances for the high-center raster but not for the linear trend?",
+    answer("There are more pairs at long distances for the high-center raster."),
+    answer("The longest pairs on the high-center raster are edge-to-edge and both low, so they are similar; the longest pairs on the linear trend are at opposite ends of the gradient and remain opposite.", correct = TRUE),
     answer("The increment is too large for the linear trend raster."),
-    allow_retry = TRUE),
-  question("Looking at the printed `correlog` objects, where are the distance classes with the fewest pairs?",
-    answer("At the shortest distances."),
-    answer("At the longest distances.", correct = TRUE),
-    answer("In the middle of the range of distances."),
     allow_retry = TRUE))
 ```
 
@@ -159,15 +170,20 @@ quiz(
 
 The increment controls the lag of the analysis. Too small, and each class holds few pairs and the correlogram is noisy; too large, and the classes average across the structure you are trying to see. A rule of thumb is to divide the maximum distance between points by 10 to 20.
 
+**Breakout activity.** Work through this exercise in your group. Before you run any code, predict what the correlogram for `sampleCent` will look like with a very small increment (2) and a very large one (30): smoother or noisier than the version with `increment = 10`? More or fewer points on the plot? Then run the code and compare. Be ready to report back one difference you saw between the two plots and why the width of the distance class caused it.
+
 **Write R code to perform the following tasks:**
 
-1. Compute a correlogram for `sampleCent` (the high-centre sample) with `increment = 2` and assign it to `correlSmall`.
+1. Compute a correlogram for `sampleCent` (the high-center sample) with `increment = 2` and assign it to `correlSmall`.
 2. Compute a second correlogram for `sampleCent` with `increment = 30` and assign it to `correlLarge`.
 3. Plot both, side by side, with `par(mfrow=c(1,2))`, and add a red horizontal line at zero to each.
 
-Use `quiet=TRUE` in both calls, as above.
+Use `quiet=TRUE` in both calls, as above. The `correlCent` call in the earlier code chunk is a template: copy it and change only the increment and the object name.
 
 ```{r increment-exercise, exercise = TRUE, exercise.lines = 15, exercise.setup = "correlogram-create", fig.align='center', fig.width=8}
+# correlSmall <- correlog(x = ..., y = ..., z = ..., increment = ..., quiet = TRUE)
+# correlLarge <- ...
+# par(mfrow = c(1, 2))
 ```
 
 ```{r increment-exercise-solution}
@@ -233,7 +249,14 @@ ggplot() +
   geom_point(data = meuse.all, aes(x = x, y = y, size = zinc))
 ```
 
-First the empirical variogram, calculated directly from the observations. The formula `log(zinc) ~ 1` says the mean is assumed constant across the study area; there is no large-scale trend to remove, and all the variation is attributed to spatial dependence. That is the assumption of **stationarity**, and both variograms and correlograms rest on it. We log-transform zinc to reduce the influence of a few extreme values.
+First the empirical variogram, calculated directly from the observations. `variogram()` takes a model formula, and the one we use here, `log(zinc) ~ 1`, is the simplest possible: the `1` on the right-hand side means "intercept only", so the model says that the expected zinc concentration is the same everywhere in the study area. Any difference between two locations is then treated as spatial structure (values that are similar because the locations are close together) rather than as a large-scale trend. That is the assumption of **stationarity**, and both variograms and correlograms rest on it. We log-transform zinc to reduce the influence of a few extreme values.
+
+The formula does not have to be this simple. If we believed the mean changed across the area, we could put that in the model instead, and the variogram would then describe the variation *around* that trend rather than the total variation. Two options that would be reasonable for these data, though we will not run them yet:
+
+- `log(zinc) ~ dist` — zinc declines with distance from the river (the floodplain deposits the metal), so the mean is a function of `dist`, and the variogram is calculated on the residuals from that relationship.
+- `log(zinc) ~ x + y` — the mean changes linearly across the map, a *trend surface*, and the variogram again describes what is left after the trend is removed.
+
+The choice matters because it changes what the variogram is measuring. With `~ 1`, the trend is part of the spatial structure and inflates the sill and range; with a trend term, the variogram describes only the finer-scale dependence that remains. We return to this later in the tutorial.
 
 ```{r variogram-no-trend, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup="meuse-data", fig.align='center', fig.width=8}
 # empirical variogram
@@ -265,13 +288,13 @@ The shorter cutoff shows the rise in detail but stops before the plateau, so it 
 
 ### Fitting a theoretical model
 
-A theoretical variogram is a smooth function fitted to the empirical points. It has three parameters, and they are the vocabulary of spatial dependence:
+A theoretical variogram is a smooth function fitted to the empirical points. It has three parameters. Each one describes a different aspect of how similarity between observations changes with distance, and together they summarize the spatial structure in the data:
 
-- **Nugget**: the semivariance at distance zero. In theory it should be zero; in practice it captures measurement error and variation at distances shorter than the closest pair of samples.
+- **Nugget**: the semivariance at distance zero. In theory, the nugget should always be zero because two samples taken at exactly the same location should have exactly the same value, so their semivariance is zero. In practice it is usually positive: it captures measurement error and variation at distances shorter than the closest pair of samples, which the sampling design cannot resolve.
 - **Sill**: the semivariance at which the curve levels off. Pairs this dissimilar are no more alike than two points chosen at random.
 - **Range**: the distance at which the sill is reached. Observations closer than the range are spatially dependent; observations farther apart are not. This is the scale of the pattern.
 
-`gstat` offers several functional forms. The code below only draws the shapes; nothing is fitted yet.
+Fitting a theoretical variogram means choosing a functional form (a curve shape) and then estimating its nugget, sill, and range from the empirical points. `gstat` offers several forms, including spherical, exponential, and Gaussian, that differ mainly in how quickly semivariance rises toward the sill and how the curve behaves near the origin. `show.vgms()` below draws each candidate shape with arbitrary parameter values so you can see what the options look like; it uses no data and fits nothing. In the next step we pick one of these forms and fit it to the Meuse empirical variogram.
 
 ```{r variogram-theory, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup="meuse-data", fig.align='center', fig.width=8}
 # different forms of possible variogram models
@@ -293,7 +316,7 @@ model.sph
 plot(zincVgm, model=model.sph)
 ```
 
-Read the printed model as follows. `fit.variogram()` returns a small table with one row per component of the model. The `Nug` row is the nugget: its `psill` (0.12) is the semivariance at distance zero — the variation between two points that are essentially on top of each other, from measurement error and from spatial structure at scales finer than the sampling. Its `range` is 0 by definition. The `Sph` row is the spherical part: its `psill` (0.52) is the *partial* sill, the amount the semivariance rises above the nugget before levelling off. The total **sill** is the sum of the two `psill` values, 0.12 + 0.52 ≈ 0.65, and matches the height where the fitted curve flattens in the plot. The `Sph` row's `range` (≈ 880) is the distance at which the curve reaches the sill, in the units of the coordinates (metres here).
+Read the printed model as follows. `fit.variogram()` returns a small table with one row per component of the model. The `Nug` row is the nugget: its `psill` (0.12) is the semivariance at distance zero — the variation between two points that are essentially on top of each other, from measurement error and from spatial structure at scales finer than the sampling. Its `range` is 0 by definition. The `Sph` row is the spherical part: its `psill` (0.52) is the *partial* sill, the amount the semivariance rises above the nugget before leveling off. The total **sill** is the sum of the two `psill` values, 0.12 + 0.52 ≈ 0.65, and matches the height where the fitted curve flattens in the plot. The `Sph` row's `range` (≈ 880) is the distance at which the curve reaches the sill, in the units of the coordinates (meters here).
 
 Putting it together: for these data the nugget is about 0.12, the sill about 0.65, and the range about 880 m. Two zinc measurements more than roughly 900 m apart are effectively independent; closer than that, they are correlated, and the closer they are the more alike they tend to be. The nugget-to-sill ratio (0.12 / 0.65 ≈ 0.19) tells you that about a fifth of the variance is unexplained at any distance, and the remaining four fifths is spatially structured.
 
@@ -408,12 +431,12 @@ quiz(
 
 ## Exercise 3 - Grain
 
-Lag is one scale decision; grain is another. Grain is the resolution of the data themselves: the cell size of a raster or the plot size of a survey. Coarsening the grain averages away everything smaller than the new cell. To see what that does to a variogram we need data whose structure we know exactly. In Exercise 1 we built rasters by hand from simple formulas; here we go one step further and generate a random field directly from a variogram model. `gstat` can do this, and it is the reverse of fitting: we specify the nugget, sill, and range, and it produces a surface with that structure.
+Lag is one scale decision; grain is another. Grain is the resolution of the data themselves: the cell size of a raster or the plot size of a survey. Coarsening the grain averages away everything smaller than the new cell resolution. To see what that does to a variogram we need data whose structure we know exactly. In Exercise 1 we built rasters by hand from simple formulas; here we go one step further and generate a random field directly from a variogram model. `gstat` can do this, and it is the reverse of fitting: we specify the nugget, sill, and range, and it produces a surface with that structure.
 
 We build the surface from two components. A **broad** component has a spherical variogram with a range of 30 units, and a **fine** component has a range of only 3 units. Their sum has structure at two scales, like a species whose abundance varies smoothly across its range and also patchily from site to site.
 
 ```{r grain-setup, exercise=TRUE, exercise.lines = 25, exercise.eval = T, fig.align='center', fig.width=9}
-# a 100 x 100 grid of cell centres
+# a 100 x 100 grid of cell centers
 grd <- expand.grid(x=seq(0.5, 99.5, 1), y=seq(0.5, 99.5, 1))
 
 # two random fields with known variogram models: broad (range 30) and fine (range 3)
