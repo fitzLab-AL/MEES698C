@@ -156,8 +156,8 @@ quiz(
     answer("The L-function, because it stays above zero out to r ~ 0.2, so clustering extends to 0.2."),
     answer("The pair correlation function, because g(r) returns to 1 near r ~ 0.08, whereas L(r) - r stays elevated because it accumulates all the pairs closer than r.", correct = TRUE),
     answer("Both plots give the same answer because both are derived from K(r)."),
-    answer("Neither, because the cluster scale can only be recovered by fitting a cluster process model.")
-    ))
+    answer("Neither, because the cluster scale can only be recovered by fitting a cluster process model."),
+    allow_retry = TRUE))
 ```
 
 ### Edge effects
@@ -224,8 +224,8 @@ quiz(
     answer("We needed to run more simulations."),
     answer("The distances between the points are relatively large."),
     answer("The pattern is significantly different from CSR, leading to a wide range of simulated values."),
-    answer("The sample size is small.", correct = TRUE)
-    ))
+    answer("The sample size is small.", correct = TRUE),
+    allow_retry = TRUE))
 ```
 
 ```{r spatial-randomness-envelope-redwood, exercise=TRUE, exercise.eval = T, exercise.setup = "spatial-randomness-distance"}
@@ -316,8 +316,8 @@ quiz(
     answer("The data are inconsistent; one of the tests must be wrong."),
     answer("Given where nests are, Cataglyphis nests are closer to Messor nests than a random assignment of species to nest sites would produce; but given each species' own spatial arrangement, the two arrangements are consistent with independence. The two nulls ask different questions.", correct = TRUE),
     answer("Random labeling is always the more powerful test, so the species interact."),
-    answer("The independence null is always the more appropriate test, so the species do not interact.")
-    ))
+    answer("The independence null is always the more appropriate test, so the species do not interact."),
+    allow_retry = TRUE))
 ```
 
 Whichever null you choose, state it. In coding assignment 4 you will be asked to interpret cross-type G-functions for four tree species; the interpretation depends on which of these nulls the envelope was built from.
@@ -380,8 +380,8 @@ quiz(
     answer("The model is wrong; elevation and slope do not affect the trees."),
     answer("After accounting for elevation and slope, the trees are still clustered at distances up to ~70 m, so the covariates explain some first-order structure but not the second-order structure. Dispersal, other unmeasured covariates, or both remain as candidate explanations.", correct = TRUE),
     answer("The envelope is too narrow because too few simulations were run."),
-    answer("The trees are dispersed, not clustered, once the covariates are included.")
-    ))
+    answer("The trees are dispersed, not clustered, once the covariates are included."),
+    allow_retry = TRUE))
 ```
 
 A Poisson process model can only ever describe first-order structure; to model clustering as well, `kppm` fits a cluster process (Thomas or Matérn) with the same covariate formula, and the Fletcher & Fortin text (Section 4.3.7) shows a Thomas process used as an alternative null. We stop here, but the same logic applies: choose the null that encodes what you already know, and read the departure from it.

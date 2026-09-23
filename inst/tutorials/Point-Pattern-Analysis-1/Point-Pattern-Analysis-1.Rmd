@@ -75,8 +75,8 @@ quiz(
     answer("Just another letter in the Greek alphabet."),
     answer("The expected number of events per unit area.", correct = TRUE),
     answer("The intensity of the Poisson point process.", correct = TRUE),
-    answer("The number of points in the analysis window.")
-  ))
+    answer("The number of points in the analysis window."),
+  allow_retry = TRUE))
 ```
 
 Now, let's generate a CSR point pattern using the `rpoispp` function and visualize the point pattern. Note that we set `nsim = 1` to generate a single realization of the point pattern. Setting `nsim` to a large number can be used for null model testing, which we take up in Part 2.
