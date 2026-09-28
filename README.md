@@ -21,6 +21,9 @@ run_tutorial("Introduction-to-Spatial-Vector-Data")
 run_tutorial("CRS-and-Spatial-Transformation")
 run_tutorial("Introduction-to-Rasters")
 run_tutorial("Advanced-Spatial-Data-in-R")
+run_tutorial("Scale-and-Spatial-Structure")
+run_tutorial("Point-Pattern-Analysis-1")
+run_tutorial("Point-Pattern-Analysis-2")
 ```
 
 This opens the tutorial in your browser or the RStudio Viewer pane, running entirely on your
