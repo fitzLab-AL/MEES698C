@@ -24,6 +24,7 @@ run_tutorial("Advanced-Spatial-Data-in-R")
 run_tutorial("Scale-and-Spatial-Structure")
 run_tutorial("Point-Pattern-Analysis-1")
 run_tutorial("Point-Pattern-Analysis-2")
+run_tutorial("Species-Distribution-Modeling-1")
 ```
 
 This opens the tutorial in your browser or the RStudio Viewer pane, running entirely on your

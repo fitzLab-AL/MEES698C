@@ -1,0 +1,333 @@
+---
+title: "Species Distribution Modeling in R, Part 1: Occurrence and Environmental Data"
+output:
+  learnr::tutorial:
+    css: css/custom.css
+    progressive: true
+    allow_skip: true
+runtime: shiny_prerendered
+---
+
+```{r setup, include=FALSE}
+library(learnr)
+library(terra)
+library(gradethis)
+# 'hold' keeps all output after all code. Without it, knitr splits a pre-evaluated
+# exercise chunk's source at each point output is printed, and learnr's editor
+# concatenates those fragments with no newline - which welds them together.
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, results = 'hold',
+                      fig.show = 'hold', exercise.lines = 15, fig.align = "center",
+                      fig.width = 7, fig.height = 6)
+gradethis::gradethis_setup()
+tutorial_options(exercise.completion = FALSE)
+```
+
+## Overview
+
+This is the first of four tutorials on species distribution models (SDMs). Before fitting any model, we need two data sets: occurrence records for a species and environmental rasters for the region where it lives. This tutorial prepares both, and uses them to look at two ideas from the theory lectures: the difference between geographic and environmental space, and what occurrence records actually sample.
+
+Our species is *Solanum acaule*, a wild potato that grows at high elevations in the Andes of Peru, Bolivia, Argentina, and northern Chile. Wild potatoes are collected for genebanks because their genes are useful for breeding cultivated potatoes, so many of the records come from collecting expeditions rather than from ecological surveys.
+
+The records were downloaded from GBIF on October 13, 2026 with the `geodata` package. The download takes several minutes, so the result is provided in the tutorial's `data/` folder. This is the code that produced it:
+
+```{r gbif-download, echo=TRUE, eval=FALSE}
+library(geodata)
+acaule <- sp_occurrence("solanum", "acaule*", geo = FALSE)
+```
+
+The climate data are the 19 WorldClim bioclimatic variables at 5 arc-minute resolution, cropped to western South America.
+
+By the end of this tutorial you should be able to clean a set of GBIF records, remove exact and gridded spatial duplicates, extract environmental values at occurrence locations, and plot occurrences in both geographic and environmental space.
+
+## Exercise 1 - Occurrence records
+
+An SDM treats every occurrence record as a place where the species lives. A record in the wrong place teaches the model the wrong climate, and no choice of algorithm, tuning, or evaluation can fix that later: garbage in, garbage out. GBIF combines records from hundreds of sources collected for many purposes, so errors are common. Always map and inspect records before modeling. You did some of this for the Austral grass tree in coding assignment 2; here we go further.
+
+Let's read the records and look at what we have. Not every record has coordinates.
+
+```{r occ-load, exercise=TRUE, exercise.eval=TRUE}
+acaule <- read.csv("data/acaule_gbif.csv")
+
+# how many records, and how many have coordinates?
+nrow(acaule)
+sum(!is.na(acaule$lon) & !is.na(acaule$lat))
+
+# what kinds of records are these?
+as.data.frame(table(basisOfRecord = acaule$basisOfRecord))
+
+# which countries are they from?
+as.data.frame(sort(table(country = acaule$country), decreasing = TRUE))
+```
+
+Most records are `OCCURRENCE` or `PRESERVED_SPECIMEN` records from genebanks and herbaria. Only a few are field observations (`HUMAN_OBSERVATION`).
+
+```{r record-type-quiz}
+quiz(
+  question("Most of these records come from genebank and herbarium collections. What does a set of records like this tell you most directly?",
+    answer("Every location where the climate is suitable for the species."),
+    answer("Where collectors went and found the species.", correct = TRUE),
+    answer("Where the species is absent."),
+    answer("The fundamental niche of the species."),
+    allow_retry = TRUE,
+    correct = "Right. Occurrence records show where the species was found and recorded. Places nobody visited have no records, whether or not the species occurs there."))
+```
+
+Now let's keep the records with coordinates and map them. The map shows the whole world, because some records may fall far outside the Andes.
+
+```{r occ-map, exercise=TRUE, exercise.eval=TRUE, exercise.setup="occ-load"}
+# keep records with coordinates
+acgeo <- subset(acaule, !is.na(lon) & !is.na(lat))
+
+# convert to a SpatVector in geographic coordinates (WGS84)
+pts <- vect(acgeo, geom = c("lon", "lat"), crs = "EPSG:4326")
+
+# country outlines from the rnaturalearth package
+world <- vect(rnaturalearth::ne_countries(scale = 110, returnclass = "sf"))
+
+plot(world, col = "gray90", border = "gray60")
+points(pts, col = "red", pch = 20, cex = 0.7)
+```
+
+```{r map-quiz}
+quiz(
+  question("Which records look wrong on this map? Select all that apply.",
+    answer("Points in northern Europe", correct = TRUE),
+    answer("Points in Mexico", correct = TRUE),
+    answer("A point in Antarctica", correct = TRUE),
+    answer("Points along the Andes"),
+    answer("Points in southern Bolivia"),
+    allow_retry = TRUE))
+```
+
+## Exercise 2 - Cleaning the records
+
+### Records outside the native range
+
+In coding assignment 2 you removed grass tree records that fell outside Australia, plus a suspicious record in the center of the continent. There are several ways to find records outside a species' native range:
+
+* Check coordinates against the hemisphere or a bounding box around the range.
+* Compare each record's recorded country with the country its coordinates fall in.
+* Check the record type: living specimens often grow in botanical gardens or genebanks far from the native range.
+* Overlay an expert range map, if one exists.
+* Look for records in unusual climates (outliers in environmental space, Exercise 4).
+
+We use the first three here. *S. acaule* is native to the Andes, so every record should have a negative longitude and a negative latitude (west of Greenwich and south of the equator), and none should fall south of the tip of South America (about 56° S). Let's look at the records that break those rules.
+
+```{r clean-errors, exercise=TRUE, exercise.eval=TRUE, exercise.setup="occ-map"}
+# records east of Greenwich or north of the equator
+odd <- subset(acgeo, lon > 0 | lat > 0)
+odd[, c("country", "lon", "lat", "basisOfRecord", "year")]
+
+# records south of South America
+subset(acgeo, lat < -56)[, c("country", "lon", "lat", "basisOfRecord", "institutionCode")]
+```
+
+The Norway records are living specimens grown in a botanical garden, not wild plants. Two records labeled Peru fall in central Mexico. Two records, one labeled Antarctica and one labeled Peru, share a single point in Antarctica with the same value for longitude and latitude, which is a data entry error. On the world map they plot as one dot. Records like these are common in GBIF, and plotting the data is often the fastest way to find them.
+
+Let's remove them and map what remains.
+
+```{r clean-native, exercise=TRUE, exercise.eval=TRUE, exercise.setup="clean-errors"}
+# keep records west of Greenwich, south of the equator, and north of 56 S
+acnat <- subset(acgeo, lon < 0 & lat < 0 & lat > -56)
+nrow(acgeo) - nrow(acnat)   # records removed
+
+pts <- vect(acnat, geom = c("lon", "lat"), crs = "EPSG:4326")
+plot(world, col = "gray90", border = "gray60", xlim = c(-85, -50), ylim = c(-45, 5))
+points(pts, col = "red", pch = 20, cex = 0.7)
+```
+
+### Cross-checking countries
+
+Errors inside South America are harder to spot on a map. One check is to compare the country recorded for each specimen with the country its coordinates fall in. A mismatch usually means the coordinates or the country label are wrong.
+
+```{r clean-crosscheck, exercise=TRUE, exercise.eval=TRUE, exercise.setup="clean-native"}
+# country polygon that each point falls in
+in_country <- extract(world[, "name"], pts)
+
+# records where the recorded country differs from the mapped country
+mismatch <- in_country$name != acnat$country
+sum(mismatch)
+as.data.frame(table(recorded_to_mapped = paste(acnat$country, "->", in_country$name)[mismatch]))
+
+# map the mismatches
+plot(world, col = "gray90", border = "gray60", xlim = c(-85, -50), ylim = c(-45, 5))
+points(pts[mismatch], col = "blue", pch = 20)
+
+acnat <- acnat[!mismatch, ]
+nrow(acnat)
+```
+
+Some mismatches fall near borders, where the coarse country outlines can put a correct record in the wrong country. Others are hundreds of kilometers away. Here we take the cautious route and remove all of them.
+
+### Coordinate uncertainty and collection year
+
+These two filters are new; coding assignment 5 uses both. They remove records with uncertain coordinates (here, more than 10 km) and records collected before the period the climate data describe (WorldClim 2.1 covers 1970-2000). Most of these records report neither value, so the code keeps records with missing values.
+
+```{r clean-filters, exercise=TRUE, exercise.eval=TRUE, exercise.setup="clean-crosscheck"}
+# keep records with uncertainty <= 10 km OR no reported uncertainty
+acfilt <- subset(acnat, is.na(coordUncertaintyM) | coordUncertaintyM <= 10000)
+
+# keep records from 1970 on OR with no reported year
+acfilt <- subset(acfilt, is.na(year) | year >= 1970)
+
+nrow(acnat) - nrow(acfilt)   # records removed
+```
+
+### Duplicates
+
+As in coding assignment 2, many records share the same coordinates, for example several genebank accessions collected at one site. Exact duplicates add no information about where the species occurs.
+
+```{r clean-dups, exercise=TRUE, exercise.eval=TRUE, exercise.setup="clean-filters"}
+# exact duplicates: same longitude and latitude
+dups <- duplicated(acfilt[, c("lon", "lat")])
+sum(dups)
+
+acnodup <- acfilt[!dups, ]
+nrow(acnodup)
+```
+
+Records that are not exact duplicates can still fall in the same raster cell. In coding assignment 2 you counted the records in each 5' cell; any cell with more than one record holds *gridded spatial duplicates*. They have identical environmental values, so the model would count one cell's climate several times. To find them, we need the climate raster we will model with.
+
+```{r clean-gridded, exercise=TRUE, exercise.eval=TRUE, exercise.setup="clean-dups"}
+bio <- rast("data/andes_bioclim_5m.tif")
+
+# raster cell number for each record
+cells <- cellFromXY(bio, as.matrix(acnodup[, c("lon", "lat")]))
+
+# records that fall in a cell already occupied by another record
+sum(duplicated(cells))
+
+# keep one record per occupied cell and move it to the cell center
+keep <- !duplicated(cells)
+acclean <- acnodup[keep, ]
+centers <- xyFromCell(bio, cells[keep])
+acclean$lon <- centers[, 1]
+acclean$lat <- centers[, 2]
+nrow(acclean)
+```
+
+Which record should represent a cell? Every record in a cell gets the same climate values from this raster, so for modeling the choice does not change the data. We place the kept point at the cell center (centroid), which represents the cell as a whole instead of whichever record happens to come first. The other columns (country, record type) come from one of the cell's records.
+
+The centers belong to this raster's grid. If you later use predictors at a different resolution or with a different grid alignment, redo this step from the original coordinates, which is why we keep `acnodup`.
+
+Let's zoom in on the cell with the most records and its eight neighbors to see what this looks like. The grid lines are the raster cell boundaries.
+
+```{r clean-gridded-map, exercise=TRUE, exercise.eval=TRUE, exercise.setup="clean-gridded"}
+# the cell with the most records, plus its eight neighbors (3 x 3 cells)
+busiest <- as.numeric(names(which.max(table(cells))))
+xy <- xyFromCell(bio, busiest)
+cs <- res(bio)[1]   # cell size in degrees (5 arc-minutes)
+win <- ext(xy[1] - 1.5 * cs, xy[1] + 1.5 * cs, xy[2] - 1.5 * cs, xy[2] + 1.5 * cs)
+
+# raster cells in the window, drawn as polygons
+grid <- as.polygons(crop(bio[["bio1"]], win), aggregate = FALSE)
+
+# original records and kept cell centers inside the window
+inwin <- acnodup$lon >= win[1] & acnodup$lon <= win[2] &
+         acnodup$lat >= win[3] & acnodup$lat <= win[4]
+cwin <- acclean$lon >= win[1] & acclean$lon <= win[2] &
+        acclean$lat >= win[3] & acclean$lat <= win[4]
+
+plot(grid, border = "gray50", main = "Open: original records. Red: cell centers kept.")
+points(acnodup$lon[inwin], acnodup$lat[inwin], pch = 1, col = "black")
+points(acclean$lon[cwin], acclean$lat[cwin], pch = 20, col = "red", cex = 1.5)
+```
+
+Each occupied cell is now represented by one point at its center (red), no matter how many records (open circles) fell in it. Several records sit exactly on cell edges because their coordinates were rounded, for example to the nearest quarter degree; a record on an edge is assigned to one of the neighboring cells.
+
+```{r dups-quiz}
+quiz(
+  question("Why remove gridded spatial duplicates before fitting an SDM?",
+    answer("They are always data entry errors."),
+    answer("They share one cell's environmental values, so that cell would carry more weight in the model than the others.", correct = TRUE),
+    answer("GBIF does not allow duplicates."),
+    allow_retry = TRUE))
+```
+
+Starting from about 7,700 records, we are left with about 850, one per occupied grid cell. A reduction of about 90% is typical when cleaning GBIF records. A download that looks large can shrink to a modest modeling data set, so check how many clean records remain before committing to a species or a raster resolution.
+
+## Exercise 3 - Environmental data
+
+The raster stack holds all 19 bioclimatic variables. We will use two of them to look at the data: annual mean temperature (`bio1`, °C) and annual precipitation (`bio12`, mm).
+
+```{r env-map, exercise=TRUE, exercise.eval=TRUE, exercise.setup="clean-gridded", fig.width=9, fig.height=5}
+bio
+
+pts <- vect(acclean, geom = c("lon", "lat"), crs = "EPSG:4326")
+
+par(mfrow = c(1, 2))
+plot(bio[["bio1"]], main = "Annual mean temperature (bio1)")
+points(pts, pch = 20, cex = 0.4)
+plot(bio[["bio12"]], main = "Annual precipitation (bio12)")
+points(pts, pch = 20, cex = 0.4)
+```
+
+Next, extract the climate values at each occurrence. `extract()` returns one row per point, plus an `ID` column.
+
+```{r env-extract, exercise=TRUE, exercise.eval=TRUE, exercise.setup="env-map"}
+occ_env <- extract(bio[[c("bio1", "bio12")]], pts)
+head(occ_env)
+
+# any records without climate values (for example, points in the ocean)?
+sum(!complete.cases(occ_env))
+
+summary(occ_env[, c("bio1", "bio12")])
+```
+
+## Exercise 4 - Geographic and environmental space
+
+The map shows the records in *geographic space*. The same records can be plotted in *environmental space*, where the axes are climate variables instead of longitude and latitude. To see which climates the species occupies, compare them with the climates available across the whole region. We take a random sample of raster cells to represent the available climate. Each gray point appears in both panels: at its location on the map, and at its climate in environmental space.
+
+```{r env-space, exercise=TRUE, exercise.eval=TRUE, exercise.setup="env-extract", fig.width=9, fig.height=5}
+# climate and location of 5,000 random cells across the region
+set.seed(698)
+avail <- spatSample(bio[[c("bio1", "bio12")]], 5000, method = "random",
+                    na.rm = TRUE, xy = TRUE)
+
+par(mfrow = c(1, 2))
+
+# geographic space: random cells (gray) and records (red)
+plot(world, xlim = c(-82, -52), ylim = c(-42, 2), col = "white", border = "gray40",
+     main = "Geographic space")
+points(avail$x, avail$y, col = "gray70", pch = 20, cex = 0.5)
+points(pts, col = "red", pch = 20, cex = 0.5)
+
+# environmental space
+plot(avail$bio1, avail$bio12, col = "gray70", pch = 20, cex = 0.5,
+     xlab = "Annual mean temperature (°C)", ylab = "Annual precipitation (mm)",
+     main = "Environmental space")
+points(occ_env$bio1, occ_env$bio12, col = "red", pch = 20, cex = 0.7)
+```
+
+Most red points sit in the cold, dry part of the climates available in the region. Points that are far apart on the map can sit close together in environmental space, and the model works in environmental space.
+
+A few records sit in warm, wet climates far from the rest. *S. acaule* grows above about 2,500 m, where annual mean temperatures are well below 15 °C, so these records are probably georeferencing errors (for example, coordinates rounded to a whole degree, or the coordinates of a province center). Plotting in environmental space can reveal errors that the map hides.
+
+```{r env-outliers, exercise=TRUE, exercise.eval=TRUE, exercise.setup="env-space"}
+# records in climates warmer than 15 °C
+warm <- which(occ_env$bio1 > 15)
+length(warm)
+head(acclean[warm, c("country", "lon", "lat", "basisOfRecord")])
+```
+
+Whether to remove records like these is a judgment call. They are about 10% of the cleaned records. We leave them in for now and return to them when we evaluate models.
+
+### Breakout activity: empty climate space
+
+**Groups of 3-4. 5 minutes, then a brief share-out.**
+
+Some climates near the red points in environmental space have no records. Using the three factors from lecture (abiotic, biotic, dispersal), plus sampling, list possible reasons why.
+
+```{r niche-quiz}
+quiz(
+  question("A model fit to these records describes which of the following?",
+    answer("The fundamental niche of *S. acaule*."),
+    answer("The portion of the realized niche that collectors sampled.", correct = TRUE),
+    answer("Every climate where *S. acaule* could survive."),
+    allow_retry = TRUE,
+    correct = "Right. The records come only from places the species reached, persists in, and someone recorded. The model cannot see suitable climates outside that sample."))
+```
+
+## Wrap-up
+
+You now have a cleaned set of presence records, one per grid cell, and a stack of climate rasters. These are the two inputs every SDM needs. In Part 2 we build the modeling data set from them: background points, checking the predictors for collinearity, and splitting the data into spatial blocks for training and testing.
