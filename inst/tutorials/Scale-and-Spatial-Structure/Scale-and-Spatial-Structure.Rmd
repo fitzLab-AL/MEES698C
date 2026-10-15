@@ -292,7 +292,7 @@ A theoretical variogram is a smooth function fitted to the empirical points. It 
 
 - **Nugget**: the semivariance at distance zero. In theory, the nugget should always be zero because two samples taken at exactly the same location should have exactly the same value, so their semivariance is zero. In practice it is usually positive: it captures measurement error and variation at distances shorter than the closest pair of samples, which the sampling design cannot resolve.
 - **Sill**: the semivariance at which the curve levels off. Pairs this dissimilar are no more alike than two points chosen at random.
-- **Range**: the distance at which the sill is reached. Observations closer than the range are spatially dependent; observations farther apart are not. This is the scale of the pattern.
+- **Range**: the distance at which the curve levels off at the sill. Observations closer than the range are spatially dependent; observations farther apart are not. This is the scale of the pattern. Be careful when you read a fitted range: for a spherical model, the `range` that `gstat` prints is this distance, but for exponential and Gaussian models it is not (more on this below).
 
 Fitting a theoretical variogram means choosing a functional form (a curve shape) and then estimating its nugget, sill, and range from the empirical points. `gstat` offers several forms, including spherical, exponential, and Gaussian, that differ mainly in how quickly semivariance rises toward the sill and how the curve behaves near the origin. `show.vgms()` below draws each candidate shape with arbitrary parameter values so you can see what the options look like; it uses no data and fits nothing. In the next step we pick one of these forms and fit it to the Meuse empirical variogram.
 
@@ -339,6 +339,8 @@ plot(zincVgm, model=model.exp)
 grade_code()
 ```
 
+Your exponential model prints a `range` of about 440, half the spherical model's 880, yet the two curves look much alike. The printed number means different things for the two forms. A spherical curve reaches the sill exactly at its `range` and stays flat. Exponential and Gaussian curves approach the sill gradually and never quite reach it, so for them the printed `range` is a scale parameter, not the distance where the curve levels off. The usual measure is the *effective* range, where the curve reaches 95% of the sill: about 3 times the printed value for an exponential model and about 1.7 times for a Gaussian model. Here that puts the exponential effective range at about 1,300 m. When you report a range, report the effective range, and check it against your plot: at the printed range of an exponential or Gaussian model, the curve is still rising.
+
 ```{r model-quiz, echo=F}
 quiz(
   question("In the printed spherical model, which number is the sill?",
@@ -347,10 +349,10 @@ quiz(
     answer("The sum of the two `psill` values.", correct = TRUE),
     answer("The `range` in the `Sph` row."),
     allow_retry = TRUE),
-  question("The exponential model's printed `range` is much smaller than the spherical model's, yet the two curves look similar on the plot. Why?",
-    answer("The exponential fit failed."),
-    answer("For an exponential model the printed `range` is a scale parameter; the curve reaches about 95% of the sill at three times that value, so the *effective* range is about three times the printed one.", correct = TRUE),
-    answer("The exponential model ignores the nugget."),
+  question("A Gaussian model fitted to `zincVgm` prints a `range` of about 380. At about what distance does the fitted curve level off?",
+    answer("About 380 m, the printed range."),
+    answer("About 650 m, roughly 1.7 times the printed range.", correct = TRUE),
+    answer("About 1,140 m, roughly 3 times the printed range."),
     allow_retry = TRUE),
   question("You want to place sample sites so that measurements of zinc are spatially independent. Based on the spherical model, how far apart should they be?",
     answer("Any distance; the data are stationary."),
