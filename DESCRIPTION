@@ -1,6 +1,6 @@
 Package: meesSpatialEcology
 Title: Interactive Tutorials for MEES 698C - Spatial Ecology in R
-Version: 0.5.4
+Version: 0.6.0
 Authors@R: person("Matt", "Fitzpatrick", email = "mfitzpatrick@umces.edu", role = c("aut", "cre"))
 Description: Local learnr tutorials for MEES 698C (Spatial Ecology in R), run via the
     sourced run_tutorial() helper (see inst/run_tutorial.R) instead of a hosted
@@ -22,6 +22,7 @@ Imports:
     gstat,
     ncf,
     kriging,
-    spatstat
+    spatstat,
+    usdm
 Remotes:
     rstudio/gradethis

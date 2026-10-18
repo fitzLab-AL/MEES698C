@@ -1,0 +1,267 @@
+---
+title: "Species Distribution Modeling in R, Part 2: Selecting Predictors"
+output:
+  learnr::tutorial:
+    css: css/custom.css
+    progressive: true
+    allow_skip: true
+runtime: shiny_prerendered
+---
+
+```{r setup, include=FALSE}
+library(learnr)
+library(terra)
+library(usdm)
+library(gradethis)
+# 'hold' keeps all output after all code. Without it, knitr splits a pre-evaluated
+# exercise chunk's source at each point output is printed, and learnr's editor
+# concatenates those fragments with no newline - which welds them together.
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, results = 'hold',
+                      fig.show = 'hold', exercise.lines = 15, fig.align = "center",
+                      fig.width = 7, fig.height = 6)
+gradethis::gradethis_setup()
+tutorial_options(exercise.completion = FALSE)
+```
+
+## Overview
+
+This is the second of four tutorials on species distribution models (SDMs). In Part 1 we cleaned the GBIF records for *Solanum acaule*, a wild potato of the high Andes, and kept one record per raster cell. Here we choose which of the 19 bioclimatic variables to use as predictors.
+
+The lecture described two ways to narrow a set of candidate predictors:
+
+* **Conceptual preselection** uses what we know about the species to decide which variables could matter, and why.
+* **Statistical preselection** checks the candidates for collinearity, using correlations and variance inflation factors (VIF).
+
+You need both. This tutorial shows what happens when you use statistics alone, and then combines the two.
+
+The cleaned records from Part 1 (859 records, one per 5' cell) are in the tutorial's `data/` folder, along with the same climate rasters.
+
+By the end of this tutorial you should be able to extract all 19 bioclimatic variables at occurrence records, measure collinearity with correlations, a dendrogram, and VIF, and explain why collinearity statistics cannot choose predictors for you.
+
+## Exercise 1 - Climate at the occurrence records
+
+The 19 WorldClim bioclimatic variables are summaries of monthly temperature and precipitation. Temperatures are in °C and precipitation in mm.
+
+| Variable | Description |
+|---|---|
+| bio1 | Annual mean temperature |
+| bio2 | Mean diurnal range (mean of monthly maximum minus minimum temperature) |
+| bio3 | Isothermality (bio2 / bio7 × 100) |
+| bio4 | Temperature seasonality (standard deviation × 100) |
+| bio5 | Maximum temperature of the warmest month |
+| bio6 | Minimum temperature of the coldest month |
+| bio7 | Temperature annual range (bio5 - bio6) |
+| bio8 | Mean temperature of the wettest quarter |
+| bio9 | Mean temperature of the driest quarter |
+| bio10 | Mean temperature of the warmest quarter |
+| bio11 | Mean temperature of the coldest quarter |
+| bio12 | Annual precipitation |
+| bio13 | Precipitation of the wettest month |
+| bio14 | Precipitation of the driest month |
+| bio15 | Precipitation seasonality (coefficient of variation) |
+| bio16 | Precipitation of the wettest quarter |
+| bio17 | Precipitation of the driest quarter |
+| bio18 | Precipitation of the warmest quarter |
+| bio19 | Precipitation of the coldest quarter |
+
+Some variables are computed directly from others. bio7 is bio5 minus bio6, and bio3 divides bio2 by bio7. Variables like these carry overlapping information by construction.
+
+Let's read the records and the rasters and extract all 19 variables at each record.
+
+```{r occ-env, exercise=TRUE, exercise.eval=TRUE}
+acclean <- read.csv("data/acaule_clean.csv")
+bio <- rast("data/andes_bioclim_5m.tif")
+
+pts <- vect(acclean, geom = c("lon", "lat"), crs = "EPSG:4326")
+
+# climate at each record; ID = FALSE drops the point ID column
+occ <- extract(bio, pts, ID = FALSE)
+dim(occ)
+
+# any records without climate values?
+sum(!complete.cases(occ))
+```
+
+Every record has a value for all 19 variables, because Part 1 placed each record at the center of a raster cell.
+
+## Exercise 2 - Statistics alone
+
+Correlated predictors cause two problems. They make model coefficients unstable, so the fitted response to one variable can change a lot when you add or drop another. And they make results hard to interpret, because the model cannot separate the effects of variables that change together.
+
+Collinearity is a property of the predictors across the whole region the model sees, not only at the records. In Part 3, background points will represent that region. For now, we use a random sample of 5,000 cells, as in Part 1.
+
+```{r avail-sample, exercise=TRUE, exercise.eval=TRUE, exercise.setup="occ-env"}
+set.seed(698)
+avail <- spatSample(bio, 5000, method = "random", na.rm = TRUE)
+dim(avail)
+head(avail[, 1:6])
+```
+
+The variance inflation factor (VIF) measures how much the variance of a regression coefficient grows because that predictor is correlated with the others. Values above 10 are a common sign of trouble. `vifstep()` from the `usdm` package computes the VIF of every variable, removes the variable with the highest VIF, recomputes, and repeats until every remaining VIF is below the threshold `th`.
+
+Let's give `vifstep()` all 19 variables and see what it keeps.
+
+```{r vif-all, exercise=TRUE, exercise.eval=TRUE, exercise.setup="avail-sample"}
+vs_all <- vifstep(avail, th = 10)
+vs_all
+
+# the variables it removed, in the order it removed them
+vs_all@excluded
+```
+
+`vifstep()` kept 9 of the 19 variables. Its first removal was bio6, the minimum temperature of the coldest month. For a frost-tolerant plant that grows where nights freeze, bio6 is the obvious variable to keep. It also kept bio8 and bio9. The next exercise explains why those two are poor choices.
+
+```{r vif-all-quiz}
+quiz(
+  question("`vifstep()` removed bio6 and kept bio8 and bio9. What does this tell you?",
+    answer("bio6 is not important for *S. acaule*."),
+    answer("VIF measures how redundant a variable is with the others, not whether it matters to the species.", correct = TRUE),
+    answer("bio8 and bio9 are the best predictors in the stack."),
+    answer("The threshold of 10 is too strict."),
+    allow_retry = TRUE,
+    correct = "Right. bio6 had the highest VIF because it is correlated with many other temperature and precipitation variables. That makes it redundant, not unimportant. VIF has no information about the species."))
+```
+
+## Exercise 3 - Conceptual preselection
+
+### Variables that mix temperature and rainfall timing
+
+bio8 is the mean temperature of the wettest quarter, and bio9 is the mean temperature of the driest quarter. Each one depends on which three months are wettest or driest. In central Chile most rain falls in winter. Farther east, in much of Argentina, most rain falls in summer. Where the wettest quarter switches from winter to summer, bio8 switches from a winter temperature to a summer temperature, even though the climate barely changes. Let's map annual mean temperature (bio1) next to bio8 and bio9 for that region.
+
+```{r quarter-maps, exercise=TRUE, exercise.eval=TRUE, exercise.setup="avail-sample", fig.width=9, fig.height=4}
+# central Chile and Argentina
+win <- ext(-75, -55, -42, -25)
+z <- crop(bio[[c("bio1", "bio8", "bio9")]], win)
+
+par(mfrow = c(1, 3))
+plot(z[["bio1"]], main = "bio1: annual mean temperature")
+plot(z[["bio8"]], main = "bio8: wettest quarter")
+plot(z[["bio9"]], main = "bio9: driest quarter")
+```
+
+bio1 changes smoothly. bio8 and bio9 have sharp edges, for example along the north-south line near 69° W in the south of the map. Let's look at three neighboring cells along that line, each about 7 km from the next.
+
+```{r quarter-cells, exercise=TRUE, exercise.eval=TRUE, exercise.setup="quarter-maps"}
+# three neighboring 5' cells at 38 degrees S
+three <- cbind(lon = c(-68.79, -68.71, -68.63), lat = c(-38.04, -38.04, -38.04))
+extract(bio[["bio1"]], three)
+extract(bio[["bio8"]], three)
+```
+
+Annual mean temperature is about 15 °C in all three cells, but bio8 jumps from about 11 °C to 22 °C and back. In the middle cell the wettest quarter falls in summer, and in its neighbors it falls in winter. A model fit with bio8 treats these cells as climatically very different. bio18 and bio19 (precipitation of the warmest and coldest quarters) mix the same two kinds of information in the other direction. Because of these artificial jumps, many modelers leave all four variables out.
+
+### What matters to *S. acaule*?
+
+*S. acaule* grows high in the Andes, where days are warm, nights freeze, and most rain falls in a short summer wet season. Potato breeders value it for its frost tolerance. From that, and from the variable table, here is a candidate set with a reason for each variable:
+
+* **bio6** (minimum temperature of the coldest month) measures exposure to frost.
+* **bio2** (mean diurnal range) measures the daily swing between warm days and freezing nights.
+* **bio5** (maximum temperature of the warmest month) captures heat, which may limit the species at lower elevations.
+* **bio12** (annual precipitation) measures total water supply.
+* **bio15** (precipitation seasonality) measures how concentrated the rain is in the wet season.
+* **bio17** (precipitation of the driest quarter) measures dry-season drought.
+
+Let's check the candidates against the records.
+
+```{r cand-records, exercise=TRUE, exercise.eval=TRUE, exercise.setup="quarter-cells"}
+cand <- c("bio2", "bio5", "bio6", "bio12", "bio15", "bio17")
+
+# climate at the records for the candidate variables
+summary(occ[, cand])
+
+# share of records where the coldest month drops below freezing
+mean(occ$bio6 < 0)
+```
+
+About 80% of the records are in places where the coldest month drops below 0 °C, which supports including bio6.
+
+```{r direct-quiz}
+quiz(
+  question("Elevation is not in our raster stack. If you added it as a predictor for *S. acaule*, what kind of predictor would it be?",
+    answer("A direct predictor, because the species only grows at high elevation."),
+    answer("An indirect predictor, because elevation acts on the plant through temperature, frost, and other variables that change with elevation.", correct = TRUE),
+    answer("A resource predictor, like water or nutrients."),
+    allow_retry = TRUE,
+    correct = "Right. Elevation works as a stand-in for the climate that changes with it. The relationship between elevation and temperature differs with latitude, so a model built on elevation transfers poorly to new places or times."))
+```
+
+## Exercise 4 - Correlations among the candidates
+
+Before computing VIF, let's look at the pairwise correlations among the candidates across the region. The lecture suggested treating correlations stronger than about 0.7 (positive or negative) as a problem.
+
+```{r cand-cor, exercise=TRUE, exercise.eval=TRUE, exercise.setup="cand-records"}
+r <- cor(avail[, cand])
+round(r, 2)
+
+# pairs with |r| > 0.7
+high <- which(abs(r) > 0.7 & upper.tri(r), arr.ind = TRUE)
+data.frame(var1 = rownames(r)[high[, 1]], var2 = colnames(r)[high[, 2]],
+           r = round(r[high], 2))
+```
+
+Four pairs pass 0.7, and two more (bio5 with bio6, and bio15 with bio17) fall just below it. bio6 is in two of the four: it is correlated with bio2 (r = -0.81) and with bio12 (r = 0.81). Across this region, places with cold winters also tend to be dry and to have large daily temperature swings, which describes the high Andes.
+
+A dendrogram groups the variables by how strongly they are correlated. Here the distance between two variables is 1 - |r|, so variables that join low on the tree are strongly correlated.
+
+```{r cand-dendro, exercise=TRUE, exercise.eval=TRUE, exercise.setup="cand-cor", fig.height=5}
+clus <- hclust(as.dist(1 - abs(r)))
+plot(clus, hang = -1, main = "Candidate predictors", xlab = "", sub = "",
+     ylab = "1 - |r|")
+```
+
+bio2 and bio6 join lowest on the tree, so they are the most strongly correlated pair. bio12 and bio17 form a second pair.
+
+## Exercise 5 - Variance inflation
+
+Correlations look at two variables at a time. VIF looks at each variable against all the others together.
+
+```{r cand-vif, exercise=TRUE, exercise.eval=TRUE, exercise.setup="cand-dendro"}
+vif(avail[, cand])
+
+vifstep(avail[, cand], th = 10)
+```
+
+bio6 has the only VIF above 10, so `vifstep()` removes it again. After that, the other VIFs fall, because they no longer share information with bio6. This is the pattern from lecture: removing one variable lowers the VIF of the variables it was correlated with.
+
+But removing bio6 throws out the frost variable. A high VIF tells you that a group of variables overlaps. It does not tell you which member of the group to drop. That choice is yours, and it should rest on biology. bio6 overlaps most with bio2 and bio12. Of those two, bio2 is the weaker reason to keep: part of what it measures, freezing nights, is already in bio6.
+
+Edit the code below to drop bio2 instead of bio6, and check that every remaining VIF is below 10.
+
+```{r final-vif, exercise=TRUE, exercise.setup="cand-vif"}
+final <- c(____)
+vif(avail[, final])
+```
+
+```{r final-vif-hint}
+final <- c("bio5", "bio6", "bio12", "bio15", "____")
+vif(avail[, final])
+```
+
+```{r final-vif-solution}
+final <- c("bio5", "bio6", "bio12", "bio15", "bio17")
+vif(avail[, final])
+```
+
+With bio2 gone, every VIF is below 6, and bio6 stays in the model.
+
+```{r keep-quiz}
+quiz(
+  question("Two candidate predictors are correlated at r = 0.85 and you can keep only one. Which should you keep?",
+    answer("The one with the lower VIF."),
+    answer("The one with the more direct link to the species' physiology or your research question.", correct = TRUE),
+    answer("The one that comes first in the raster stack."),
+    answer("Either one; the choice does not matter."),
+    allow_retry = TRUE,
+    correct = "Right. Statistics tell you the two overlap. Biology tells you which one belongs in the model."))
+```
+
+## Wrap-up
+
+We started with 19 variables and ended with five: bio5, bio6, bio12, bio15, and bio17. Statistics alone would have kept nine, dropped the frost variable, and kept two variables with artificial jumps. Conceptual preselection chose the candidates, and correlations and VIF checked them for overlap.
+
+Two notes for coding assignment 5:
+
+* The VIF here was computed on a random sample of cells. In the assignment you will run `vifstep()` on the table of presences and background points, the data the model is fit to.
+* `vifstep()` decides which variable to remove by VIF alone. If it removes a variable you need, look at what that variable is correlated with and decide for yourself which one to drop.
+
+In Part 3 we add background points and fit models with these predictors.

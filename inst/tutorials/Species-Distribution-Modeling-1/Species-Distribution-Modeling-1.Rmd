@@ -330,4 +330,4 @@ quiz(
 
 ## Wrap-up
 
-You now have a cleaned set of presence records, one per grid cell, and a stack of climate rasters. These are the two inputs every SDM needs. In Part 2 we build the modeling data set from them: background points, checking the predictors for collinearity, and splitting the data into spatial blocks for training and testing.
+You now have a cleaned set of presence records, one per grid cell, and a stack of climate rasters. These are the two inputs every SDM needs. In Part 2 we choose predictors from the 19 climate variables, using what we know about the species and checking the candidates for collinearity.
