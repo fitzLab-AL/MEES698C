@@ -53,7 +53,8 @@ install_if_missing("spatstat")
 # coding assignment 5 - species distribution models
 # note: viridisLite already arrives as a ggplot2 dependency, but the
 # assignments call library(viridisLite) directly, so install it explicitly
-install_if_missing(c("dismo", "predicts", "ENMeval", "usdm", "tidyterra", "viridisLite"))
+install_if_missing(c("dismo", "predicts", "usdm", "tidyterra", "viridisLite",
+                     "maxnet", "blockCV", "ecospat", "randomForest", "gbm"))
 
 # course package - interactive tutorials for MEES 698C
 # (always run: install_github() skips the download itself when the installed
