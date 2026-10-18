@@ -148,7 +148,7 @@ extract(bio[["bio1"]], three)
 extract(bio[["bio8"]], three)
 ```
 
-Annual mean temperature is about 15 °C in all three cells, but bio8 jumps from about 11 °C to 22 °C and back. In the middle cell the wettest quarter falls in summer, and in its neighbors it falls in winter. A model fit with bio8 treats these cells as climatically very different. bio18 and bio19 (precipitation of the warmest and coldest quarters) mix the same two kinds of information in the other direction. Because of these artificial jumps, many modelers leave all four variables out.
+Annual mean temperature is about 15 °C in all three cells, but bio8 jumps from about 11 °C to 22 °C and back. In the middle cell the wettest quarter falls in summer, and in its neighbors it falls in winter. A model fit with bio8 treats these cells as climatically very different. Because of these artificial jumps, many modelers leave bio8 and bio9 out.
 
 ### What matters to *S. acaule*?
 
