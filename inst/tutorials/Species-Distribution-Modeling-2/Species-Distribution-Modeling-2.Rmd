@@ -88,7 +88,7 @@ Every record has a value for all 19 variables, because Part 1 placed each record
 
 Correlated predictors cause two problems. They make model coefficients unstable, so the fitted response to one variable can change a lot when you add or drop another. And they make results hard to interpret, because the model cannot separate the effects of variables that change together.
 
-Collinearity is a property of the predictors across the whole region the model sees, not only at the records. In Part 3, background points will represent that region. For now, we use a random sample of 5,000 cells, as in Part 1.
+Collinearity is a property of the predictors across the whole region the model sees, not only at the records. The models in Part 3 are fit to the presences plus background points spread across the region. The background points far outnumber the presences, so collinearity across the region is what affects those models' coefficients. For now, a random sample of 5,000 cells stands in for the background, as in Part 1. A method fit to the presences alone, such as Mahalanobis distance, would check collinearity at the occurrence records instead.
 
 ```{r avail-sample, exercise=TRUE, exercise.eval=TRUE, exercise.setup="occ-env"}
 set.seed(698)
@@ -109,7 +109,7 @@ vs_all
 vs_all@excluded
 ```
 
-`vifstep()` kept 9 of the 19 variables. Its first removal was bio6, the minimum temperature of the coldest month. For a frost-tolerant plant that grows where nights freeze, bio6 is the obvious variable to keep. It also kept bio8 and bio9. The next exercise explains why those two are poor choices.
+`vifstep()` kept 9 of the 19 variables. Its first removal was bio6, the minimum temperature of the coldest month. For a frost-tolerant plant of the cold high Andes, bio6 is the obvious variable to keep. It also kept bio8 and bio9. The next exercise explains why those two are poor choices.
 
 ```{r vif-all-quiz}
 quiz(
@@ -154,8 +154,8 @@ Annual mean temperature is about 15 °C in all three cells, but bio8 jumps from 
 
 *S. acaule* grows high in the Andes, where days are warm, nights freeze, and most rain falls in a short summer wet season. Potato breeders value it for its frost tolerance. From that, and from the variable table, here is a candidate set with a reason for each variable:
 
-* **bio6** (minimum temperature of the coldest month) measures exposure to frost.
-* **bio2** (mean diurnal range) measures the daily swing between warm days and freezing nights.
+* **bio6** (minimum temperature of the coldest month) is the average daily low in the coldest month. It measures winter cold and serves as a proxy for frost risk, though it does not count frost nights.
+* **bio2** (mean diurnal range) measures the average daily swing in temperature, which is large in the high Andes.
 * **bio5** (maximum temperature of the warmest month) captures heat, which may limit the species at lower elevations.
 * **bio12** (annual precipitation) measures total water supply.
 * **bio15** (precipitation seasonality) measures how concentrated the rain is in the wet season.
@@ -169,11 +169,11 @@ cand <- c("bio2", "bio5", "bio6", "bio12", "bio15", "bio17")
 # climate at the records for the candidate variables
 summary(occ[, cand])
 
-# share of records where the coldest month drops below freezing
+# share of records where the average daily low in the coldest month is below 0 °C
 mean(occ$bio6 < 0)
 ```
 
-About 80% of the records are in places where the coldest month drops below 0 °C, which supports including bio6.
+About 80% of the records are in places where the average daily low in the coldest month is below 0 °C, so freezing nights are routine across most of the species' range. That supports including bio6 as a measure of winter cold.
 
 ```{r direct-quiz}
 quiz(
@@ -223,7 +223,7 @@ vifstep(avail[, cand], th = 10)
 
 bio6 has the only VIF above 10, so `vifstep()` removes it again. After that, the other VIFs fall, because they no longer share information with bio6. This is the pattern from lecture: removing one variable lowers the VIF of the variables it was correlated with.
 
-But removing bio6 throws out the frost variable. A high VIF tells you that a group of variables overlaps. It does not tell you which member of the group to drop. That choice is yours, and it should rest on biology. bio6 overlaps most with bio2 and bio12. Of those two, bio2 is the weaker reason to keep: part of what it measures, freezing nights, is already in bio6.
+But removing bio6 throws out the best measure of winter cold in the stack. A high VIF tells you that a group of variables overlaps. It does not tell you which member of the group to drop. That choice is yours, and it should rest on biology. bio6 overlaps most with bio2 and bio12. Of those two, bio2 is the weaker reason to keep: the daily temperature range alone does not say how cold it gets, while bio6 tracks how cold winter nights get, which is the more direct link to a cold limit.
 
 Edit the code below to drop bio2 instead of bio6, and check that every remaining VIF is below 10.
 
@@ -257,7 +257,7 @@ quiz(
 
 ## Wrap-up
 
-We started with 19 variables and ended with five: bio5, bio6, bio12, bio15, and bio17. Statistics alone would have kept nine, dropped the frost variable, and kept two variables with artificial jumps. Conceptual preselection chose the candidates, and correlations and VIF checked them for overlap.
+We started with 19 variables and ended with five: bio5, bio6, bio12, bio15, and bio17. Statistics alone would have kept nine, dropped the measure of winter cold, and kept two variables with artificial jumps. Conceptual preselection chose the candidates, and correlations and VIF checked them for overlap.
 
 Two notes for coding assignment 5:
 
