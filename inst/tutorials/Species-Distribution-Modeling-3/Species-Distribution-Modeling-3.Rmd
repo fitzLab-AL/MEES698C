@@ -1,0 +1,438 @@
+---
+title: "Species Distribution Modeling in R, Part 3: Fitting Models"
+output:
+  learnr::tutorial:
+    css: css/custom.css
+    progressive: true
+    allow_skip: true
+runtime: shiny_prerendered
+---
+
+```{r setup, include=FALSE}
+library(learnr)
+library(terra)
+library(sf)
+library(blockCV)
+library(maxnet)
+library(randomForest)
+library(gbm)
+library(gradethis)
+# 'hold' keeps all output after all code. Without it, knitr splits a pre-evaluated
+# exercise chunk's source at each point output is printed, and learnr's editor
+# concatenates those fragments with no newline - which welds them together.
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, results = 'hold',
+                      fig.show = 'hold', exercise.lines = 15, fig.align = "center",
+                      fig.width = 7, fig.height = 6)
+gradethis::gradethis_setup()
+tutorial_options(exercise.completion = FALSE, exercise.timelimit = 60)
+
+# Every exercise from Exercise 3 on starts from these objects. The modeling table is
+# the one built in Exercises 1 and 2, saved in data/ so that all exercises share it.
+bio <- rast("data/andes_bioclim_5m.tif")
+vars <- c("bio5", "bio6", "bio12", "bio15", "bio17")
+bioVars <- bio[[vars]]
+sdm <- read.csv("data/acaule_model_data.csv")
+train <- subset(sdm, fold != 1)
+test <- subset(sdm, fold == 1)
+```
+
+## Overview
+
+This is the third of four tutorials on species distribution models (SDMs). In Part 1 we cleaned the GBIF records for *Solanum acaule*, a wild potato of the high Andes. In Part 2 we chose five predictors:
+
+* **bio5**, maximum temperature of the warmest month
+* **bio6**, minimum temperature of the coldest month
+* **bio12**, annual precipitation
+* **bio15**, precipitation seasonality
+* **bio17**, precipitation of the driest quarter
+
+Here we add background points, set aside part of the data for testing, and fit the five methods from lecture: Mahalanobis distance, a GLM, MaxEnt, random forest, and boosted regression trees (BRT). In Part 4 we evaluate the models on the data we set aside and project them to a future climate.
+
+The cleaned records (859 records, one per 5' cell) and the climate rasters are in the tutorial's `data/` folder.
+
+By the end of this tutorial you should be able to build a presence-background table, split it into spatial blocks, fit and map all five models, read MaxEnt response curves, and explain what regularization and down-sampling do to a model.
+
+## Exercise 1 - Background points
+
+Every method in this tutorial except Mahalanobis distance compares the climate at the presences with the climate of the region as a whole. **Background points**, a random sample of cells, represent the environment of the region. Background points are not absences: *S. acaule* could occur at some of them. They describe which climates are available, so the model can compare the environments where the species occurs (strictly, where it has been observed) with the environments available in the study region.
+
+We draw 10,000 background points from the whole raster, which covers western South America from the Pacific coast to the Amazon lowlands.
+
+```{r bg-points, exercise=TRUE}
+acclean <- read.csv("data/acaule_clean.csv")
+bio <- rast("data/andes_bioclim_5m.tif")
+vars <- c("bio5", "bio6", "bio12", "bio15", "bio17")   # the predictors from Part 2
+bioVars <- bio[[vars]]
+
+# climate at the presences
+pres <- data.frame(x = acclean$lon, y = acclean$lat)
+presEnv <- extract(bioVars, pres, ID = FALSE)
+
+# 10,000 random background cells, with their coordinates
+set.seed(698)
+bg <- spatSample(bioVars, size = 10000, method = "random", na.rm = TRUE, xy = TRUE)
+
+# one table: pa = 1 for presences, 0 for background
+sdm <- rbind(data.frame(pa = 1, pres, presEnv),
+             data.frame(pa = 0, bg[, c("x", "y")], bg[, vars]))
+table(sdm$pa)
+head(sdm, 3)
+
+land <- !is.na(bio[["bio1"]])
+plot(land, col = c(NA, "gray90"), legend = FALSE, main = "Presences and background points")
+points(sdm[sdm$pa == 0, c("x", "y")], pch = ".", col = "gray40")
+points(sdm[sdm$pa == 1, c("x", "y")], pch = 20, cex = 0.6, col = "red")
+# legend in the Pacific, at the lower left of the map
+legend(x = -82, y = -33, c("Background", "Presences"), pch = c(15, 20),
+       col = c("gray40", "red"), bg = "white", cex = 0.8)
+```
+
+**Reading the output.** The table holds 859 presences and 10,000 background points, each with its coordinates and its values for the five predictors. The background covers the whole region, including the Amazon lowlands, the Atacama Desert, and Patagonia. The presences follow the Andes: 95% of them lie between about 9° S and 29° S.
+
+```{r bg-quiz}
+quiz(
+  question("Suppose you drew the background points only from the Andes above 3,000 m instead of from all of western South America. What would change?",
+    answer("Nothing. The background does not affect the model."),
+    answer("The model would compare the presences with other high, cold places, so heat (bio5) would separate presences from background less well, and the response curves would describe differences within the highlands.", correct = TRUE),
+    answer("The model would predict high suitability in the Amazon lowlands."),
+    answer("The background points would become true absences."),
+    allow_retry = TRUE,
+    correct = "Right. The background defines what the presences are compared against. A highland background removes the obvious contrast with the hot lowlands, so the model has to find finer differences, and its predictions apply only to the region the background covers."))
+```
+
+## Exercise 2 - Spatial blocks
+
+In Part 4 we test the models on data they were not fit to, so we set those data aside now, before fitting anything. Records close together share similar climates (the spatial dependence from Week 6), so instead of holding out random records we hold out whole blocks of the map.
+
+`cv_spatial()` from the `blockCV` package divides the region into hexagonal blocks about 300 km across, assigns each block to one of five folds, and returns the fold of every point. We fit the models to folds 2 through 5 and keep fold 1 for testing in Part 4.
+
+```{r blocks, exercise=TRUE, exercise.setup="bg-points"}
+# cv_spatial() needs an sf object
+sdm.sf <- st_as_sf(sdm, coords = c("x", "y"), crs = 4326, remove = FALSE)
+
+# hexagonal blocks about 300 km across (size is in meters), assigned to five folds at random
+sb <- cv_spatial(x = sdm.sf, column = "pa", k = 5, size = 300000,
+                 selection = "random", seed = 698,
+                 plot = FALSE, progress = FALSE, report = FALSE)
+
+sdm$fold <- sb$folds_ids
+table(fold = sdm$fold, pa = sdm$pa)
+
+# fold 1 for testing, folds 2-5 for training
+train <- subset(sdm, fold != 1)
+test <- subset(sdm, fold == 1)
+
+plot(land, col = c(NA, "gray90"), legend = FALSE, main = "Training and testing presences")
+# all blocks in gray, the fold 1 (test) blocks outlined in red
+plot(st_geometry(sb$blocks), add = TRUE, border = "gray60")
+plot(st_geometry(sb$blocks[sb$blocks$folds == 1, ]), add = TRUE, border = "red", lwd = 2)
+points(train[train$pa == 1, c("x", "y")], pch = 20, cex = 0.6, col = "blue")
+points(test[test$pa == 1, c("x", "y")], pch = 20, cex = 0.6, col = "red")
+legend(x = -82, y = -33, c("Training", "Testing (fold 1)"), pch = 20,
+       col = c("blue", "red"), bg = "white", cex = 0.8)
+```
+
+**Reading the output.** Each fold holds between 145 and 235 presences. Fold 1, the test fold, holds 145 presences and 2,036 background points, which leaves 714 presences and 7,964 background points for training. The test presences come from two areas: the Altiplano near 16-21° S and northwestern Argentina near 24-29° S. In both areas there are training presences close by, but none inside the held-out blocks. On the map, the gray hexagons are the blocks, and the red outlines mark the fold 1 blocks. The test blocks are scattered across the whole region, so the test data include background points from every part of it.
+
+The rest of the tutorial reads this table from `data/acaule_model_data.csv`, so every exercise below starts from the same `train` and `test` data.
+
+## Exercise 3 - Mahalanobis distance
+
+Mahalanobis distance is the one method here that uses only the presences. It measures how far each cell's climate is from the mean climate of the training presences. The distance accounts for the correlations among the predictors, so it measures how unusual a combination of values is, not only how unusual each value is. If two predictors usually rise together, a cell that is high on both is closer to the mean climate of the presences than a cell that is high on one and low on the other. That is why the lines of equal distance on the lecture slide are tilted ellipses.
+
+If the climate at the presences is roughly multivariate normal, the squared Mahalanobis distance follows a chi-square distribution with *k* degrees of freedom, where *k* is the number of predictors. `pchisq()` turns each distance into a p-value between 0 and 1: near 1 for cells close to the mean climate of the presences and near 0 for cells far from it.
+
+```{r mahal, exercise=TRUE}
+presTrain <- train[train$pa == 1, vars]
+mu <- colMeans(presTrain)    # mean climate at the training presences
+sig <- cov(presTrain)        # covariance of climate at the training presences
+k <- length(vars)
+round(mu, 1)
+
+# app() applies the function to every cell of the raster stack
+mahalPred <- app(bioVars, function(x) {
+  pchisq(mahalanobis(x, mu, sig), df = k, lower.tail = FALSE)
+})
+plot(mahalPred, main = "Mahalanobis distance (p-value)", range = c(0, 1))
+```
+
+**Reading the output.** At the average training presence, the warmest month reaches about 19 °C, the coldest month falls to about -3 °C, and about 610 mm of rain falls a year, concentrated in one season (bio15 of about 94). The highest values on the map are on the Altiplano of southern Peru and Bolivia, where the presences are densest, and only about 4% of the land has a value above 0.5. Values are also moderately high in the southern Andes between about 33° S and 38° S, where there are no records.
+
+```{r mahal-quiz}
+quiz(
+  question("A cell's climate equals the mean climate of the training presences on all five predictors. What value does it get on this map?",
+    answer("0"),
+    answer("0.5"),
+    answer("1", correct = TRUE),
+    answer("It depends on the background points."),
+    allow_retry = TRUE,
+    correct = "Right. Its distance is 0, and pchisq(0, df = 5, lower.tail = FALSE) is 1. The background points play no part in Mahalanobis distance."))
+```
+
+## Exercise 4 - GLM
+
+A GLM for a 0/1 response (`family = binomial` in `glm()`) is logistic regression. Here it models the probability that a point is a presence rather than a background point. Many species do best somewhere in the middle of an environmental gradient. Along a temperature gradient, for example, one end may be too cold for a plant to survive the winter and the other too hot for it to grow, so it occurs most often in between. Adding a quadratic term with `poly(x, 2)` lets the curve rise and then fall, so the model can represent that optimum. If a study region covers only one side of a species' range along a gradient, the response can still rise or fall across the whole region.
+
+```{r glm-fit, exercise=TRUE}
+# a quadratic term for each predictor
+glmForm <- as.formula(paste("pa ~", paste0("poly(", vars, ", 2)", collapse = " + ")))
+glmForm
+
+glmMod <- glm(glmForm, family = binomial, data = train)
+glmPred <- predict(bioVars, glmMod, type = "response", na.rm = TRUE)
+plot(glmPred, main = "GLM (probability)")
+```
+
+**Reading the output.** The GLM places its highest values in the Andes of Peru and Bolivia, and its maximum is about 0.69. These values are probabilities of being a presence rather than a background point, so they depend on how many background points we drew (about 11 per presence in the training data). They are not the probability that *S. acaule* occurs in a cell.
+
+To see the shape of a fitted response, vary one predictor across its range and hold the others at their mean at the training presences.
+
+```{r glm-curve, exercise=TRUE, exercise.setup="glm-fit", fig.height=5}
+typical <- colMeans(train[train$pa == 1, vars])
+nd <- data.frame(t(typical))[rep(1, 100), ]
+nd$bio6 <- seq(min(train$bio6), max(train$bio6), length.out = 100)
+nd$p <- predict(glmMod, nd, type = "response")
+
+plot(p ~ bio6, data = nd, type = "l", lwd = 2, ylim = c(0, 1),
+     xlab = "bio6: minimum temperature of the coldest month (°C)",
+     ylab = "Predicted probability", main = "GLM response to bio6")
+
+# mark the peak with dotted lines and print its values
+peak <- nd[which.max(nd$p), ]
+segments(peak$bio6, 0, peak$bio6, peak$p, lty = 3)
+segments(par("usr")[1], peak$p, peak$bio6, peak$p, lty = 3)
+round(peak[, c("bio6", "p")], 2)
+```
+
+**Reading the plot.** The probability peaks at about 0.64 where the coldest month's minimum is near -2 °C. It falls to about 0.52 in the coldest places (-16 °C) and to about 0.30 in the warmest (23 °C). The quadratic term lets the curve rise and then fall, so the GLM can represent an optimum in the middle of the range.
+
+```{r glm-linear-quiz}
+quiz(
+  question("Before you run the next exercise: if the GLM had only linear terms, what shapes could the bio6 curve take?",
+    answer("Any shape, including a peak in the middle of the range."),
+    answer("Only a curve that rises across the whole range or falls across the whole range.", correct = TRUE),
+    answer("Only a straight line."),
+    allow_retry = TRUE,
+    correct = "Right. A linear term on the logit scale gives an S-shaped curve on the probability scale, but it always moves in one direction. It cannot peak in the middle of the range."))
+```
+
+Fill in the formula with linear terms only (the five predictor names joined by `+`), then compare the two curves.
+
+```{r glm-linear, exercise=TRUE, exercise.setup="glm-curve", fig.height=5}
+glmLin <- glm(pa ~ ____, family = binomial, data = train)
+nd$pLin <- predict(glmLin, nd, type = "response")
+
+plot(p ~ bio6, data = nd, type = "l", lwd = 2, ylim = c(0, 1),
+     xlab = "bio6: minimum temperature of the coldest month (°C)",
+     ylab = "Predicted probability", main = "GLM response to bio6")
+lines(pLin ~ bio6, data = nd, lwd = 2, lty = 2)
+legend("topright", c("Quadratic", "Linear"), lty = c(1, 2), lwd = 2, bty = "n")
+```
+
+```{r glm-linear-hint}
+glmLin <- glm(pa ~ bio5 + bio6 + ____ + ____ + ____, family = binomial, data = train)
+```
+
+```{r glm-linear-solution}
+glmLin <- glm(pa ~ bio5 + bio6 + bio12 + bio15 + bio17, family = binomial, data = train)
+nd$pLin <- predict(glmLin, nd, type = "response")
+
+plot(p ~ bio6, data = nd, type = "l", lwd = 2, ylim = c(0, 1),
+     xlab = "bio6: minimum temperature of the coldest month (°C)",
+     ylab = "Predicted probability", main = "GLM response to bio6")
+lines(pLin ~ bio6, data = nd, lwd = 2, lty = 2)
+legend("topright", c("Quadratic", "Linear"), lty = c(1, 2), lwd = 2, bty = "n")
+```
+
+**Reading the plot.** With linear terms only, the curve falls from about 0.49 at -16 °C to about 0.11 at 23 °C. It can only say that colder is better across the whole range, so it cannot represent the optimum near -2 °C. It lies below the quadratic curve everywhere, by the most (about 0.3) near that optimum.
+
+## Exercise 5 - MaxEnt
+
+`maxnet()` from the `maxnet` package fits MaxEnt in R. The original MaxEnt is a separate Java program, and older R code calls it through `dismo::maxent()`, which needs Java installed; `maxnet()` needs no extra software. It needs a vector of 1s and 0s (presences and background) and a data frame of predictors. With 80 or more training presences, `maxnet()` builds linear, quadratic, product, and hinge features from the predictors. Regularization then shrinks the coefficients of most features to zero.
+
+```{r maxnet-fit, exercise=TRUE}
+mx <- maxnet(p = train$pa, data = train[, vars])
+
+# features with nonzero coefficients after regularization
+length(mx$betas)
+
+# cloglog output, the default in MaxEnt 3.4 and later
+mxPred <- predict(bioVars, mx, fun = function(m, d) predict(m, d, type = "cloglog"),
+                  na.rm = TRUE)
+plot(mxPred, main = "MaxEnt (cloglog)")
+```
+
+**Reading the output.** From these five predictors `maxnet()` built 510 candidate features, and regularization kept 32 of them. Most of the 32 are hinge features, which let a response change slope at a threshold (the "linear threshold" features from lecture). The `regmult` exercise below shows how that number depends on regularization.
+
+The map is highest along the Andes from central Peru to northwestern Argentina, with a maximum of about 0.91. Like Mahalanobis distance, it gives moderate values in the southern Andes south of 33° S, where there are no records.
+
+`plot()` on a fitted `maxnet` model draws one response curve per predictor. Each curve varies one predictor and holds the others at their mean at the presences. The x-axis runs 10% past the range of the training data at each end; the flat stretches at the ends are where the model holds its prediction constant outside that range.
+
+```{r maxnet-curves, exercise=TRUE, exercise.setup="maxnet-fit", fig.width=9, fig.height=6}
+plot(mx, type = "cloglog")
+```
+
+**Reading the plots.**
+
+* **bio5:** suitability is highest where the warmest month reaches about 14 °C, falls steeply above about 22 °C, and is near 0 above 33 °C. Warm summers exclude the species from low elevations.
+* **bio6:** suitability rises from about 0.3 at -15 °C to about 0.8 at -5 °C, stays near 0.8 up to about 15 °C, and falls slightly in warmer winters.
+* **bio12:** suitability is below 0.1 where almost no rain falls, rises to about 0.8 near 250 mm, stays high to about 1,000 mm, and falls to about 0.3 by 2,300 mm.
+* **bio15:** suitability peaks at a seasonality near 100, where most rain falls in one season, and is near 0 below 25 and above 160.
+* **bio17:** suitability is highest (about 0.87) where the driest quarter gets no rain and drops to about 0.36 where it gets 300 mm or more.
+
+Together the curves describe cool summers, cold winters, and moderate rain that falls in one wet season, with little or none in the dry season. That is the climate of the high Andes from Peru to northwestern Argentina. Each curve holds the other predictors at their mean, and the predictors are still correlated, so a curve can carry part of the effect of a predictor it is correlated with.
+
+The regularization multiplier (`regmult`, the "beta" in lecture) scales how strongly `maxnet()` penalizes complexity. The default is 1.
+
+```{r regmult-quiz}
+quiz(
+  question("Before you run the next exercise: what do you expect when `regmult` goes from 1 to 5?",
+    answer("More features keep nonzero coefficients, and the curves become more jagged."),
+    answer("Fewer features keep nonzero coefficients, and the curves become smoother.", correct = TRUE),
+    answer("Nothing changes, because regularization only affects the map."),
+    allow_retry = TRUE,
+    correct = "Right. A larger multiplier widens the tolerance around each constraint, so the model needs fewer features to satisfy them, and the response curves have fewer bends."))
+```
+
+Set `regmult` to 5 and compare the number of features and the curves with the model above.
+
+```{r maxnet-regmult, exercise=TRUE, exercise.setup="maxnet-fit", fig.width=9, fig.height=6}
+mx5 <- maxnet(p = train$pa, data = train[, vars], regmult = ____)
+length(mx5$betas)
+plot(mx5, type = "cloglog")
+```
+
+```{r maxnet-regmult-solution}
+mx5 <- maxnet(p = train$pa, data = train[, vars], regmult = 5)
+length(mx5$betas)
+plot(mx5, type = "cloglog")
+```
+
+**Reading the plots.** With `regmult = 5`, 22 features keep nonzero coefficients instead of 32, and the curves have fewer bends. bio5 no longer rises between 0 and 14 °C; it declines across its whole range. bio6 becomes a single smooth hump that peaks near 0 °C, and bio17 declines in a straight line to about 280 mm and is flat beyond. A larger multiplier gives up some fit to the training data in exchange for curves that are simpler to interpret and less likely to fit noise. In Part 4 we test whether that trade costs any predictive performance.
+
+## Exercise 6 - Random forest
+
+A random forest grows many classification trees, each on a bootstrap sample of the data, and averages their votes. The training data hold about 11 background points per presence (7,964 and 714). A bootstrap sample of the whole table has the same imbalance, so each tree can classify most points correctly by calling nearly everything background. Valavi et al. (2022) found that **down-sampling** fixes this: each tree draws equal numbers of presences and background points. Their down-sampled random forest was the second-best method in the whole comparison.
+
+Let's fit both versions. `sampsize` sets how many points of each class each tree draws.
+
+```{r rf-fit, exercise=TRUE}
+nPres <- sum(train$pa == 1)
+
+# default: each tree draws a bootstrap sample of all points
+set.seed(698)
+rfDef <- randomForest(x = train[, vars], y = factor(train$pa), ntree = 500)
+
+# down-sampled: each tree draws nPres background points and nPres presences
+set.seed(698)
+rfBal <- randomForest(x = train[, vars], y = factor(train$pa), ntree = 500,
+                      sampsize = c("0" = nPres, "1" = nPres))
+
+# out-of-bag confusion matrices: rows are the observed class (0 = background)
+rfDef$confusion
+rfBal$confusion
+
+# percent of each class misclassified out of bag
+err <- round(100 * cbind(default = rfDef$confusion[, "class.error"],
+                         down_sampled = rfBal$confusion[, "class.error"]))
+rownames(err) <- c("background (0)", "presence (1)")
+err
+```
+
+**Reading the output.** In a confusion matrix, rows are the observed class and columns are the class the forest predicted. `class.error` is the share of each row the forest got wrong, and the last table shows it as a percentage. The default forest misclassifies nearly 40% of the training presences out of bag, but only 3% of the background points. The down-sampled forest misclassifies about 6% of the presences and 8% of the background points. Trading some background errors for far fewer presence errors is the point: background points are not absences, and some of them have the same climate as the presences. (Your numbers for the default forest may differ slightly from these, depending on your computer.)
+
+```{r rf-maps, exercise=TRUE, exercise.setup="rf-fit", fig.width=9, fig.height=5}
+rfDefPred <- predict(bioVars, rfDef, type = "prob", index = 2, na.rm = TRUE)
+rfPred <- predict(bioVars, rfBal, type = "prob", index = 2, na.rm = TRUE)
+plot(c(rfDefPred, rfPred), main = c("Default", "Down-sampled"), range = c(0, 1))
+```
+
+**Reading the maps.** The default forest predicts high values only in narrow, patchy bands close to the records, and about 3% of the land has a value above 0.5. The down-sampled forest predicts a broader, more continuous band along the Andes, and about 7% of the land has a value above 0.5.
+
+Variable importance in a random forest measures how much each predictor improves the trees' splits, summed over all splits that use it and averaged across trees.
+
+```{r rf-importance, exercise=TRUE, exercise.setup="rf-fit", fig.height=4}
+varImpPlot(rfBal, type = 2, main = "Down-sampled random forest")
+```
+
+**Reading the plot.** bio5 has the highest importance, followed by bio6, bio15, bio12, and bio17. The forest relies most on summer heat, as the steep decline in the MaxEnt bio5 curve suggested. The lecture also described a second measure: shuffle one predictor's values and see how much the out-of-bag error increases. `randomForest()` computes it when you set `importance = TRUE`.
+
+## Exercise 7 - Boosted regression trees
+
+Boosted regression trees add small trees one at a time, and each new tree is fit to the errors of the trees before it. Two settings control the fit. The **learning rate** sets how much each tree contributes, and **tree complexity** sets how many splits each tree can make (a tree complexity of 3 allows interactions among up to three predictors). Elith et al. (2008) recommend a learning rate small enough that the model uses at least 1,000 trees.
+
+`gbm.step()` from the `dismo` package chooses the number of trees by 10-fold cross-validation. It adds trees 50 at a time until the cross-validated deviance stops improving. We call it as `dismo::gbm.step()` without loading `dismo`, because loading `dismo` also loads `raster`, the older package that `terra` replaced.
+
+This exercise takes about 30-40 seconds.
+
+```{r brt-fit, exercise=TRUE, exercise.timelimit=180, fig.height=4}
+set.seed(698)
+brt <- dismo::gbm.step(data = train, gbm.x = vars, gbm.y = "pa", family = "bernoulli",
+                       tree.complexity = 3, learning.rate = 0.01, bag.fraction = 0.75,
+                       plot.main = FALSE, silent = TRUE, verbose = FALSE)
+
+# number of trees chosen by cross-validation
+brt$gbm.call$best.trees
+
+# relative influence of each predictor (percent)
+summary(brt, las = 1)
+
+brtPred <- predict(bioVars, brt, n.trees = brt$gbm.call$best.trees,
+                   type = "response", na.rm = TRUE)
+```
+
+**Reading the output.** Cross-validation chose 1,650 trees, above the minimum of 1,000 that Elith et al. recommend. bio5 has the largest relative influence (about 57%), followed by bio15 (17%), bio12 (11%), bio6 (8%), and bio17 (7%). The random forest also ranked bio5 first but put bio6 second. bio5 and bio6 are correlated (r = 0.75 in the training data), so two methods can divide the credit between them differently. Importance tells you which predictors a model used, not which one limits the species.
+
+```{r brt-quiz}
+quiz(
+  question("If you halved the learning rate to 0.005, about how many trees would `gbm.step()` choose?",
+    answer("About half as many."),
+    answer("About the same number."),
+    answer("About twice as many.", correct = TRUE),
+    answer("Exactly 1,000."),
+    allow_retry = TRUE,
+    correct = "Right. Each tree contributes half as much, so the model needs about twice as many trees to reach the same fit, and it takes about twice as long to fit."))
+```
+
+## Exercise 8 - Comparing the five models
+
+Fitting all five models again takes about a minute, so the five maps from the exercises above are saved in `data/acaule_predictions.tif`.
+
+```{r compare, exercise=TRUE, fig.width=12, fig.height=3.6}
+preds <- rast("data/acaule_predictions.tif")
+names(preds)
+plot(preds, nc = 5, range = c(0, 1))
+
+# correlations between the five maps across all land cells
+round(cor(values(preds), use = "complete.obs"), 2)
+```
+
+**Reading the output.** All five models give their highest values in the Andes between central Peru and northwestern Argentina, and the maps are strongly correlated (0.85 to 0.95). GLM and MaxEnt are the most similar (0.95). Both fit the presences against the same background, and MaxEnt fits a penalized model closely related to logistic regression. Mahalanobis distance and the random forest are the least similar (0.85).
+
+The maps differ in how far suitability extends. Mahalanobis distance concentrates its highest values on the Altiplano, the random forest spreads them along the whole cordillera, and the GLM never exceeds 0.69. Most of the models also give moderate values in the southern Andes south of 33° S, where there are no records.
+
+```{r compare-quiz}
+quiz(
+  question("The highest GLM value is about 0.69 and the highest random forest value is 1. Does this mean the random forest predicts that *S. acaule* is more likely to occur?",
+    answer("Yes. Higher values mean a higher probability of occurrence."),
+    answer("No. The five outputs are on different scales, so compare where each map is high or low, not the values themselves.", correct = TRUE),
+    answer("Yes, because the random forest was down-sampled."),
+    allow_retry = TRUE,
+    correct = "Right. Mahalanobis gives a p-value, MaxEnt gives cloglog values, and the GLM, random forest, and BRT give probabilities of being a presence rather than a background point, which depend on how many background points each model saw. None is the probability that the species occurs in a cell."),
+  question("Several models give moderate values in the southern Andes, where there are no records. Which of these could explain the gap between the maps and the records? Select all that apply.",
+    answer("The species may not have dispersed to those mountains.", correct = TRUE),
+    answer("Few collectors may have looked for it there.", correct = TRUE),
+    answer("Competitors or pathogens may exclude it there.", correct = TRUE),
+    answer("Climate cannot affect where the species grows."),
+    allow_retry = TRUE,
+    correct = "Right. A climate model maps where the climate resembles the climate at the records. Dispersal limits, sampling gaps, and biotic interactions can all leave suitable climate unoccupied or unrecorded."))
+```
+
+## Wrap-up
+
+We fit five models to the same training data. They agree on the core of the range in the central Andes and differ in how far suitability extends beyond it. In Part 4 we evaluate the five models on the test fold and project them to a future climate.
+
+Two notes for coding assignment 5:
+
+* `terra::predict()` maps `glm`, `randomForest`, and `gbm` models directly. For `maxnet`, supply a function that calls `predict()` with the output type, as in Exercise 5.
+* When you compare your models, compare where each map is high and low, not the raw values, because each method's output is on its own scale.

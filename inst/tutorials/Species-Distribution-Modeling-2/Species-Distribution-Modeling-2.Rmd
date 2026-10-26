@@ -68,7 +68,7 @@ Some variables are computed directly from others. bio7 is bio5 minus bio6, and b
 
 Let's read the records and the rasters and extract all 19 variables at each record.
 
-```{r occ-env, exercise=TRUE, exercise.eval=TRUE}
+```{r occ-env, exercise=TRUE}
 acclean <- read.csv("data/acaule_clean.csv")
 bio <- rast("data/andes_bioclim_5m.tif")
 
@@ -90,7 +90,7 @@ Correlated predictors cause two problems. They make model coefficients unstable,
 
 Collinearity is a property of the predictors across the whole region the model sees, not only at the records. The models in Part 3 are fit to the presences plus background points spread across the region. The background points far outnumber the presences, so collinearity across the region is what affects those models' coefficients. For now, a random sample of 5,000 cells stands in for the background, as in Part 1. A method fit to the presences alone, such as Mahalanobis distance, would check collinearity at the occurrence records instead.
 
-```{r avail-sample, exercise=TRUE, exercise.eval=TRUE, exercise.setup="occ-env"}
+```{r avail-sample, exercise=TRUE, exercise.setup="occ-env"}
 set.seed(698)
 avail <- spatSample(bio, 5000, method = "random", na.rm = TRUE)
 dim(avail)
@@ -101,7 +101,7 @@ The variance inflation factor (VIF) measures how much the variance of a regressi
 
 Let's give `vifstep()` all 19 variables and see what it keeps.
 
-```{r vif-all, exercise=TRUE, exercise.eval=TRUE, exercise.setup="avail-sample"}
+```{r vif-all, exercise=TRUE, exercise.setup="avail-sample"}
 vs_all <- vifstep(avail, th = 10)
 vs_all
 
@@ -128,7 +128,7 @@ quiz(
 
 bio8 is the mean temperature of the wettest quarter, and bio9 is the mean temperature of the driest quarter. Each one depends on which three months are wettest or driest. In central Chile most rain falls in winter. Farther east, in much of Argentina, most rain falls in summer. Where the wettest quarter switches from winter to summer, bio8 switches from a winter temperature to a summer temperature, even though the climate barely changes. Let's map annual mean temperature (bio1) next to bio8 and bio9 for that region.
 
-```{r quarter-maps, exercise=TRUE, exercise.eval=TRUE, exercise.setup="avail-sample", fig.width=9, fig.height=4}
+```{r quarter-maps, exercise=TRUE, exercise.setup="avail-sample", fig.width=9, fig.height=4}
 # central Chile and Argentina
 win <- ext(-75, -55, -42, -25)
 z <- crop(bio[[c("bio1", "bio8", "bio9")]], win)
@@ -141,7 +141,7 @@ plot(z[["bio9"]], main = "bio9: driest quarter")
 
 bio1 changes smoothly. bio8 and bio9 have sharp edges, for example along the north-south line near 69° W in the south of the map. Let's look at three neighboring cells along that line, each about 7 km from the next.
 
-```{r quarter-cells, exercise=TRUE, exercise.eval=TRUE, exercise.setup="quarter-maps"}
+```{r quarter-cells, exercise=TRUE, exercise.setup="quarter-maps"}
 # three neighboring 5' cells at 38 degrees S
 three <- cbind(lon = c(-68.79, -68.71, -68.63), lat = c(-38.04, -38.04, -38.04))
 extract(bio[["bio1"]], three)
@@ -163,7 +163,7 @@ Annual mean temperature is about 15 °C in all three cells, but bio8 jumps from 
 
 Let's check the candidates against the records.
 
-```{r cand-records, exercise=TRUE, exercise.eval=TRUE, exercise.setup="quarter-cells"}
+```{r cand-records, exercise=TRUE, exercise.setup="quarter-cells"}
 cand <- c("bio2", "bio5", "bio6", "bio12", "bio15", "bio17")
 
 # climate at the records for the candidate variables
@@ -189,7 +189,7 @@ quiz(
 
 Before computing VIF, let's look at the pairwise correlations among the candidates across the region. The lecture suggested treating correlations stronger than about 0.7 (positive or negative) as a problem.
 
-```{r cand-cor, exercise=TRUE, exercise.eval=TRUE, exercise.setup="cand-records"}
+```{r cand-cor, exercise=TRUE, exercise.setup="cand-records"}
 r <- cor(avail[, cand])
 round(r, 2)
 
@@ -203,7 +203,7 @@ Four pairs pass 0.7, and two more (bio5 with bio6, and bio15 with bio17) fall ju
 
 A dendrogram groups the variables by how strongly they are correlated. Here the distance between two variables is 1 - |r|, so variables that join low on the tree are strongly correlated.
 
-```{r cand-dendro, exercise=TRUE, exercise.eval=TRUE, exercise.setup="cand-cor", fig.height=5}
+```{r cand-dendro, exercise=TRUE, exercise.setup="cand-cor", fig.height=5}
 clus <- hclust(as.dist(1 - abs(r)))
 plot(clus, hang = -1, main = "Candidate predictors", xlab = "", sub = "",
      ylab = "1 - |r|")
@@ -215,7 +215,7 @@ bio2 and bio6 join lowest on the tree, so they are the most strongly correlated 
 
 Correlations look at two variables at a time. VIF looks at each variable against all the others together.
 
-```{r cand-vif, exercise=TRUE, exercise.eval=TRUE, exercise.setup="cand-dendro"}
+```{r cand-vif, exercise=TRUE, exercise.setup="cand-dendro"}
 vif(avail[, cand])
 
 vifstep(avail[, cand], th = 10)

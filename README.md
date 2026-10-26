@@ -25,6 +25,8 @@ run_tutorial("Scale-and-Spatial-Structure")
 run_tutorial("Point-Pattern-Analysis-1")
 run_tutorial("Point-Pattern-Analysis-2")
 run_tutorial("Species-Distribution-Modeling-1")
+run_tutorial("Species-Distribution-Modeling-2")
+run_tutorial("Species-Distribution-Modeling-3")
 ```
 
 This opens the tutorial in your browser or the RStudio Viewer pane, running entirely on your
