@@ -1,0 +1,399 @@
+---
+title: "Species Distribution Modeling in R, Part 4: Evaluating and Projecting Models"
+output:
+  learnr::tutorial:
+    css: css/custom.css
+    progressive: true
+    allow_skip: true
+runtime: shiny_prerendered
+---
+
+```{r setup, include=FALSE}
+library(learnr)
+library(terra)
+library(maxnet)
+library(predicts)
+library(ecospat)
+library(gradethis)
+# 'hold' keeps all output after all code. Without it, knitr splits a pre-evaluated
+# exercise chunk's source at each point output is printed, and learnr's editor
+# concatenates those fragments with no newline - which welds them together.
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, results = 'hold',
+                      fig.show = 'hold', exercise.lines = 15, fig.align = "center",
+                      fig.width = 7, fig.height = 6)
+gradethis::gradethis_setup()
+tutorial_options(exercise.completion = FALSE, exercise.timelimit = 60)
+
+# The data from Part 3: the modeling table with its spatial folds, the current climate,
+# and the five models' maps. Exercise 1 shows how testP and testBg are made.
+bio <- rast("data/andes_bioclim_5m.tif")
+vars <- c("bio5", "bio6", "bio12", "bio15", "bio17")
+bioVars <- bio[[vars]]
+sdm <- read.csv("data/acaule_model_data.csv")
+train <- subset(sdm, fold != 1)
+test <- subset(sdm, fold == 1)
+preds <- rast("data/acaule_predictions.tif")
+testP <- extract(preds, test[test$pa == 1, c("x", "y")], ID = FALSE)
+testBg <- extract(preds, test[test$pa == 0, c("x", "y")], ID = FALSE)
+# the central Andes, for maps of the projections
+andes <- ext(-80, -60, -35, -5)
+```
+
+## Overview
+
+This is the last of four tutorials on species distribution models (SDMs). In Part 3 we fit five models to *Solanum acaule*, a wild potato of the high Andes: Mahalanobis distance, a GLM, MaxEnt, a random forest, and boosted regression trees (BRT). We fit them to folds 2-5 of a spatial block split and set fold 1 aside.
+
+Here we use fold 1 to evaluate the models with the two metrics that coding assignment 5 asks for, AUC and the continuous Boyce index. Then we project the models to the climate of 2061-2080, map where that climate is outside the range of the training data, and check where the five models agree.
+
+The future climate comes from the same CMIP6 scenario as coding assignment 5: the MPI-ESM1-2-HR climate model under SSP5-8.5. `geodata::cmip6_world()` downloads it for the whole world (about 125 MB), so the five predictors, cropped to our region, are in the tutorial's `data/` folder. So are the five models' current and future maps from Part 3.
+
+By the end of this tutorial you should be able to evaluate a model on held-out data with AUC and the Boyce index, project a model to a future climate, map where the projection extrapolates, and compare the projections of several models.
+
+## Exercise 1 - Predictions at the test points
+
+To evaluate a model on the test fold, we need its prediction at each test presence and each test background point. `extract()` reads all five maps at those points at once.
+
+```{r test-values, exercise=TRUE, fig.width=10, fig.height=4}
+preds <- rast("data/acaule_predictions.tif")
+names(preds)
+
+testP <- extract(preds, test[test$pa == 1, c("x", "y")], ID = FALSE)
+testBg <- extract(preds, test[test$pa == 0, c("x", "y")], ID = FALSE)
+nrow(testP)
+nrow(testBg)
+
+# mean prediction at the test presences and the test background points
+round(rbind(presences = colMeans(testP), background = colMeans(testBg)), 2)
+
+par(mfrow = c(1, 5))
+for (m in names(preds)) {
+  boxplot(list(Pres = testP[[m]], Bg = testBg[[m]]), main = m, ylim = c(0, 1))
+}
+```
+
+**Reading the output.** The test fold holds 145 presences and 2,036 background points. Every model gives higher values at the test presences than at the test background points: the mean at the presences runs from 0.43 (GLM and BRT) to 0.75 (random forest), and the mean at the background points from 0.04 to 0.10. Most background points get values near 0, but hundreds of them, drawn as circles above the boxes, get values as high as a typical presence, and a few test presences get low values. The metrics in the next two exercises measure that overlap in different ways.
+
+## Exercise 2 - AUC
+
+AUC is the probability that a randomly chosen presence gets a higher value than a randomly chosen absence. With background points in place of absences, it is the probability that a presence outranks a random background point. `pa_evaluate()` from the `predicts` package computes it from the predictions at the presences (`p`) and at the absences or background points (`a`).
+
+```{r auc-glm, exercise=TRUE}
+e <- pa_evaluate(p = testP$GLM, a = testBg$GLM)
+e@stats
+```
+
+**Reading the output.** `np` and `na` are the numbers of presences and background points, and `auc` is 0.958. `pa_evaluate()` also reports a correlation between the predictions and the 0/1 data (`cor`) and threshold statistics, which we do not use here.
+
+```{r auc-quiz}
+quiz(
+  question("The GLM's test AUC is 0.958, computed with background points. What does that mean?",
+    answer("A randomly chosen test presence gets a higher GLM value than a randomly chosen test background point about 96% of the time.", correct = TRUE),
+    answer("The GLM predicts the species correctly in about 96% of cells."),
+    answer("Where the GLM value is high, the species occurs with a probability of about 0.96."),
+    answer("The GLM's maximum value is 0.958."),
+    allow_retry = TRUE,
+    correct = "Right. AUC measures how well the model ranks presences above background points. Some background points lie in suitable places, so even a perfect model would score below 1."))
+```
+
+Now compute AUC for all five models. `sapply()` runs the function once for each model name and collects the results. Fill in the argument for the background points.
+
+```{r auc-all, exercise=TRUE}
+auc <- sapply(names(preds), function(m) {
+  pa_evaluate(p = testP[[m]], a = ____)@stats$auc
+})
+round(auc, 3)
+```
+
+```{r auc-all-hint}
+# the predictions at the test background points are in testBg, one column per model
+```
+
+```{r auc-all-solution}
+auc <- sapply(names(preds), function(m) {
+  pa_evaluate(p = testP[[m]], a = testBg[[m]])@stats$auc
+})
+round(auc, 3)
+```
+
+**Reading the output.** All five models have a test AUC between 0.954 (BRT) and 0.967 (random forest). Part of the reason is the background. Most background points lie in the Amazon lowlands, the Atacama Desert, and Patagonia, whose climates no model confuses with the high Andes, so every model ranks the presences above them. The lecture breakout made the same point: a large area of clearly unsuitable background can inflate AUC.
+
+## Exercise 3 - The continuous Boyce index
+
+The continuous Boyce index (Hirzel et al. 2006) uses only presences and the prediction map. It moves a window along the range of predicted values. In each window it compares the share of test presences (P) with the share of the study area whose prediction falls in that window (E). If the model is good, P/E rises steadily from low to high predictions, and the index is the Spearman correlation between P/E and the predicted value.
+
+Hirzel, A. H., G. Le Lay, V. Helfer, C. Randin, and A. Guisan. 2006. Evaluating the ability of habitat suitability models to predict species presences. *Ecological Modelling* 199:142-152.
+
+`ecospat.boyce()` takes the prediction in every cell of the map (`fit`) and the predictions at the test presences (`obs`). It draws the P/E curve.
+
+```{r boyce-glm, exercise=TRUE, fig.height=5}
+glmVals <- values(preds[["GLM"]], na.rm = TRUE)[, 1]   # every land cell
+b <- ecospat.boyce(fit = glmVals, obs = testP$GLM)
+b$cor
+```
+
+**Reading the output.** The GLM's Boyce index is 0.881. P/E stays below 1 for predictions below about 0.12 and rises to about 30 near 0.57: test presences are about 30 times more common there than the area with those predictions. Above 0.6, P/E falls steeply, because few test presences fall in the cells with the GLM's highest values. That drop and the dip near 0.5 keep the index below 1.
+
+Compute both metrics for all five models.
+
+```{r boyce-all, exercise=TRUE}
+boyce <- sapply(names(preds), function(m) {
+  ecospat.boyce(fit = values(preds[[m]], na.rm = TRUE)[, 1], obs = testP[[m]],
+                PEplot = FALSE)$cor
+})
+auc <- sapply(names(preds), function(m) {
+  pa_evaluate(p = testP[[m]], a = testBg[[m]])@stats$auc
+})
+round(rbind(AUC = auc, Boyce = boyce), 3)
+```
+
+**Reading the output.** The Boyce index spreads the models out more than AUC does: it runs from 0.881 (GLM) to 0.951 (Mahalanobis distance), while AUC runs from 0.954 to 0.967. The two metrics also rank the models differently. The random forest is first on AUC and second on the Boyce index. Mahalanobis distance is fourth on AUC and first on the Boyce index. The GLM is third on AUC and last on the Boyce index.
+
+```{r metric-quiz}
+quiz(
+  question("Which model performed best on the test fold?",
+    answer("The random forest, because it has the highest AUC."),
+    answer("Mahalanobis distance, because it has the highest Boyce index."),
+    answer("It depends on the metric, and all five models discriminate well. The maps and response curves matter as much as these numbers.", correct = TRUE),
+    allow_retry = TRUE,
+    correct = "Right. The AUC values differ by 0.013, too little to separate the models, and the Boyce index ranks them differently. Coding assignment 5 asks the same question about your models."))
+```
+
+## Exercise 4 - Does regularization cost performance?
+
+In Part 3, raising the MaxEnt regularization multiplier (`regmult`, the "beta" in lecture) from 1 to 5 cut the number of features from 32 to 22 and smoothed the response curves. Did the simpler model predict the test fold less well?
+
+```{r regmult-quiz}
+quiz(
+  question("Before you run the next exercise: what do you expect on the test fold when `regmult` goes from 1 to 5?",
+    answer("Lower AUC and Boyce index, because the model fits the training data less closely."),
+    answer("About the same or better, because the features that regularization removes mostly fit details of the training data that do not carry over to new blocks.", correct = TRUE),
+    allow_retry = TRUE,
+    correct = "Run the exercise to check. Fitting the training data more closely does not guarantee better predictions for blocks the model has not seen."))
+```
+
+The function `evalMx()` maps a fitted model, predicts it at the test points, and returns its AUC and Boyce index. This exercise takes about 15 seconds.
+
+```{r regmult-eval, exercise=TRUE, exercise.timelimit=120, fig.width=10, fig.height=4}
+mx1 <- maxnet(p = train$pa, data = train[, vars])
+mx5 <- maxnet(p = train$pa, data = train[, vars], regmult = 5)
+
+evalMx <- function(mod) {
+  map <- predict(bioVars, mod, fun = function(m, d) predict(m, d, type = "cloglog"),
+                 na.rm = TRUE)
+  p <- predict(mod, test[test$pa == 1, vars], type = "cloglog")[, 1]
+  a <- predict(mod, test[test$pa == 0, vars], type = "cloglog")[, 1]
+  c(AUC = pa_evaluate(p = p, a = a)@stats$auc,
+    Boyce = ecospat.boyce(fit = values(map, na.rm = TRUE)[, 1], obs = p,
+                          PEplot = FALSE)$cor)
+}
+
+round(rbind(regmult1 = evalMx(mx1), regmult5 = evalMx(mx5)), 3)
+
+# response curves: vary one predictor, hold the others at their mean at the training presences
+typical <- colMeans(train[train$pa == 1, vars])
+labs <- c(bio5 = "bio5: max temperature of warmest month (°C)",
+          bio6 = "bio6: min temperature of coldest month (°C)",
+          bio17 = "bio17: precipitation of driest quarter (mm)")
+par(mfrow = c(1, 3))
+for (v in names(labs)) {
+  nd <- data.frame(t(typical))[rep(1, 100), ]
+  nd[[v]] <- seq(min(train[[v]]), max(train[[v]]), length.out = 100)
+  plot(nd[[v]], predict(mx1, nd, type = "cloglog"), type = "l", lwd = 2, ylim = c(0, 1),
+       xlab = labs[v], ylab = "Predicted value (cloglog)")
+  lines(nd[[v]], predict(mx5, nd, type = "cloglog"), lwd = 2, lty = 2)
+}
+legend("topright", c("regmult = 1", "regmult = 5"), lty = c(1, 2), lwd = 2, bty = "n")
+```
+
+**Reading the output.** The `regmult1` row is the MaxEnt model from Part 3, so it matches the MaxEnt column in Exercise 3: AUC 0.959 and Boyce index 0.928. With `regmult = 5` the AUC is the same, 0.959, and the Boyce index rises to 0.951. The ten features that the larger multiplier removed did not help the model predict the held-out blocks. For these data, the simpler model is easier to interpret and loses nothing.
+
+The curves show what changed. With `regmult = 1`, the bio5 curve rises to a peak near 14 °C before it falls; with `regmult = 5` it declines across the whole range. The bio6 curve becomes a smooth hump that peaks near 0 °C and falls to about 0.3 in the warmest winters, where the `regmult = 1` curve stays near 0.8 up to about 15 °C. The bio17 curve declines in a straight line to about 280 mm instead of dropping steeply over the first 100 mm.
+
+## Exercise 5 - Projecting to 2061-2080
+
+To project a model, call `predict()` with the future rasters in place of the current ones. `predict()` matches raster layers to model variables by name, so the future layers need the same names as the training data.
+
+```{r fut-load, exercise=TRUE}
+fut <- rast("data/andes_cmip6_2061-2080_5m.tif")
+names(fut)       # the names that cmip6_world() gives the layers
+names(bioVars)   # the names the models were fit with
+
+glmForm <- as.formula(paste("pa ~", paste0("poly(", vars, ", 2)", collapse = " + ")))
+glmMod <- glm(glmForm, family = binomial, data = train)
+
+# tryCatch() returns the error message instead of stopping
+tryCatch(predict(fut, glmMod, type = "response", na.rm = TRUE),
+         error = function(e) conditionMessage(e))
+```
+
+**Reading the output.** CMIP6 layers are named with two digits (`bio05`), and the models were fit with `bio5`. `predict()` looks for a layer called `bio5`, finds none, and stops with "object 'bio5' not found".
+
+Rename the future layers, then project the GLM and MaxEnt. The maps show the central Andes, where the species occurs.
+
+```{r fut-project, exercise=TRUE, exercise.setup="fut-load", fig.width=10, fig.height=8}
+names(fut) <- ____
+glmFut <- predict(fut, glmMod, type = "response", na.rm = TRUE)
+
+mx <- maxnet(p = train$pa, data = train[, vars])
+mxFut <- predict(fut, mx, fun = function(m, d) predict(m, d, type = "cloglog"),
+                 na.rm = TRUE)
+
+# current, future, and change (future minus current; red = loss, blue = gain)
+rdbu <- hcl.colors(21, "RdBu")
+par(mfrow = c(2, 3))
+plot(crop(preds[["GLM"]], andes), range = c(0, 1), main = "GLM current")
+plot(crop(glmFut, andes), range = c(0, 1), main = "GLM 2061-2080")
+plot(crop(glmFut - preds[["GLM"]], andes), range = c(-0.5, 0.5), col = rdbu,
+     main = "GLM change")
+plot(crop(preds[["MaxEnt"]], andes), range = c(0, 1), main = "MaxEnt current")
+plot(crop(mxFut, andes), range = c(0, 1), main = "MaxEnt 2061-2080")
+plot(crop(mxFut - preds[["MaxEnt"]], andes), range = c(-0.5, 0.5), col = rdbu,
+     main = "MaxEnt change")
+```
+
+```{r fut-project-hint}
+# the layers are in the same order as vars, so give them those names
+names(fut) <- vars
+```
+
+```{r fut-project-solution}
+names(fut) <- vars
+glmFut <- predict(fut, glmMod, type = "response", na.rm = TRUE)
+
+mx <- maxnet(p = train$pa, data = train[, vars])
+mxFut <- predict(fut, mx, fun = function(m, d) predict(m, d, type = "cloglog"),
+                 na.rm = TRUE)
+
+# current, future, and change (future minus current; red = loss, blue = gain)
+rdbu <- hcl.colors(21, "RdBu")
+par(mfrow = c(2, 3))
+plot(crop(preds[["GLM"]], andes), range = c(0, 1), main = "GLM current")
+plot(crop(glmFut, andes), range = c(0, 1), main = "GLM 2061-2080")
+plot(crop(glmFut - preds[["GLM"]], andes), range = c(-0.5, 0.5), col = rdbu,
+     main = "GLM change")
+plot(crop(preds[["MaxEnt"]], andes), range = c(0, 1), main = "MaxEnt current")
+plot(crop(mxFut, andes), range = c(0, 1), main = "MaxEnt 2061-2080")
+plot(crop(mxFut - preds[["MaxEnt"]], andes), range = c(-0.5, 0.5), col = rdbu,
+     main = "MaxEnt change")
+```
+
+**Reading the maps.** Under this scenario, the warmest month in the cells with records warms by a median of 3.2 °C. Both models shrink the area of high suitability: the share of land above 0.5 falls from 2.5% to 2.1% for the GLM and from 5.8% to 4.5% for MaxEnt. Suitability declines most on the lower slopes east of the Andes in Bolivia and northwestern Argentina, and it holds or increases on the highest ground of southern Peru and Bolivia.
+
+The change maps (future minus current) show this directly. Both models lose suitability (red) on the eastern slopes between about 17° S and 28° S and gain it (blue) on the Altiplano of southern Peru and Bolivia, and MaxEnt also loses it in the Andes near 32° S. These change maps run from -0.5 to 0.5, a narrower scale than in Exercise 7, because neither model changes by more than about 0.45 in any cell.
+
+## Exercise 6 - Where the projection extrapolates
+
+A model has no data from climates outside the range of its training data, so its predictions there depend on how the method extrapolates. A MESS (multivariate environmental similarity surface; Elith et al. 2010) maps where that happens. For each variable, it scores how typical a cell's value is of the training data: 100 at the median, 0 at the training minimum or maximum, and negative outside that range. A cell's MESS is its lowest score across the variables, so a negative MESS means at least one variable is outside the training range.
+
+`mess()` from `predicts` takes the future rasters and the training data. With `full = TRUE` it also returns the score for each variable.
+
+```{r mess, exercise=TRUE, fig.height=5}
+fut <- rast("data/andes_cmip6_2061-2080_5m.tif")
+names(fut) <- vars
+messFut <- mess(fut, train[, vars], full = TRUE)
+names(messFut)
+
+plot(messFut[["mess"]] < 0, col = c("gray85", "darkorange"),
+     main = "MESS < 0: outside the training range")
+```
+
+**Reading the output.** About half the region has a negative MESS. Nearly all of it lies east of the Andes, in the Amazon lowlands and the Chaco. The Andes themselves stay inside the training range: only 6 of the 859 cells with records have a negative MESS.
+
+Which variable puts those cells outside the range? `which.min()` returns, for each cell, the layer with the lowest score.
+
+```{r mess-vars, exercise=TRUE, exercise.setup="mess", fig.height=5}
+scores <- messFut[[paste0(vars, "_mess")]]
+leastSimilar <- which.min(scores)       # 1 = bio5, 2 = bio6, ...
+extrap <- values(messFut[["mess"]] < 0)[, 1] == 1
+
+# percent of the extrapolated cells set by each variable
+tab <- table(vars[values(leastSimilar)[extrap, 1]])
+round(100 * tab / sum(tab))
+
+# training range and future range of bio5
+range(train$bio5)
+minmax(fut[["bio5"]])
+```
+
+```{r mess-quiz}
+quiz(
+  question("Which predictor puts most of the lowlands outside the training range?",
+    answer("bio5, the maximum temperature of the warmest month", correct = TRUE),
+    answer("bio6, the minimum temperature of the coldest month"),
+    answer("bio12, annual precipitation"),
+    answer("bio17, precipitation of the driest quarter"),
+    allow_retry = TRUE,
+    correct = "Right. bio5 sets the MESS in about 79% of the extrapolated cells, and bio6 in the rest. By 2061-2080 the warmest month in the lowlands reaches about 42.5 °C, and the hottest training point is 36.5 °C."))
+```
+
+How do the five models behave in those cells? Here is the random forest's projection, shown only where MESS is negative.
+
+```{r mess-rf, exercise=TRUE, exercise.setup="mess", fig.height=5}
+futPreds <- rast("data/acaule_future_predictions.tif")
+rfExtrap <- mask(futPreds[["RandomForest"]], messFut[["mess"]] < 0, maskvalues = c(0, NA))
+plot(rfExtrap, range = c(0, 1), main = "Random forest, 2061-2080, where MESS < 0")
+
+# cells where MESS < 0 and the forest predicts more than 0.3
+global(rfExtrap > 0.3, "sum", na.rm = TRUE)
+```
+
+**Reading the output.** Most of the extrapolated cells get values near 0, but the forest gives values above 0.3 to 193 of them, in a few patches of the lowlands. The other four models stay at or below 0.1 there.
+
+```{r rf-quiz}
+quiz(
+  question("The random forest predicts values above 0.3 in 193 lowland cells whose future summers are hotter than any training point. What should you conclude?",
+    answer("S. acaule could spread into the lowlands by 2061-2080."),
+    answer("These values are extrapolations. Beyond the training range a tree model keeps the value of its last split, so the values say nothing about how the species would respond to hotter summers.", correct = TRUE),
+    answer("The random forest is the most reliable model, because its test AUC was highest."),
+    allow_retry = TRUE,
+    correct = "Right. A MESS map shows where to distrust a projection. Here the other four models predict near 0 in the same cells, which is also what you would expect for a plant of the cold high Andes."))
+```
+
+## Exercise 7 - Do the models agree?
+
+Projecting all five models takes about a minute, so their future maps are saved in `data/acaule_future_predictions.tif`. The change in suitability is the future map minus the current map.
+
+```{r change-maps, exercise=TRUE, fig.width=12, fig.height=4}
+futPreds <- rast("data/acaule_future_predictions.tif")
+chg <- futPreds - preds
+plot(crop(chg, andes), nc = 5, range = c(-1, 1), col = hcl.colors(21, "RdBu"),
+     main = names(chg))
+```
+
+**Reading the maps.** Red is a loss and blue a gain. All five models show losses on the eastern slopes of the Andes in Bolivia and northwestern Argentina and gains in parts of the highest ground of southern Peru and Bolivia. The size of the changes differs because each model's output is on its own scale.
+
+To compare the models without comparing their values, count how many of them predict a gain or a loss in each cell. Changes smaller than 0.1 are ignored, so a cell that goes from 0.01 to 0.02 does not count as a gain.
+
+```{r agreement, exercise=TRUE, exercise.setup="change-maps", fig.width=9, fig.height=5}
+nGain <- sum(chg > 0.1)
+nLoss <- sum(chg < -0.1)
+plot(crop(c(nGain, nLoss), andes), col = c("gray90", hcl.colors(5, "viridis", rev = TRUE)),
+     main = c("Models predicting a gain", "Models predicting a loss"))
+
+# cells where at least four of the five models agree
+c(gain = global(nGain >= 4, "sum", na.rm = TRUE)[1, 1],
+  loss = global(nLoss >= 4, "sum", na.rm = TRUE)[1, 1])
+```
+
+**Reading the output.** At least four models agree on a loss in 3,392 cells and on a gain in 593. The agreed gains are on the coldest ground, where the annual mean temperature today is about 1-6 °C, mostly between 14° S and 23° S. The agreed losses are on warmer slopes (about 9-17 °C), mostly between 18° S and 28° S and in the Andes south of 30° S. Together they describe a range that moves upslope and shrinks as the climate warms.
+
+```{r agree-quiz}
+quiz(
+  question("Why count the models that predict a gain instead of averaging the five change maps?",
+    answer("Counting is faster to compute."),
+    answer("The five outputs are on different scales, so an average would weight the models with the widest range of values most heavily.", correct = TRUE),
+    answer("Averaging would remove the losses."),
+    allow_retry = TRUE,
+    correct = "Right. The GLM never exceeds 0.70 and the random forest reaches 1, so their changes are not comparable values. Counting asks only whether each model's suitability rises or falls."))
+```
+
+## Wrap-up
+
+We evaluated the five models on blocks they were not fit to and projected them to the climate of 2061-2080. All five discriminate well on the test fold, the Boyce index separates them more than AUC does, and the two metrics rank them differently. In the projections, about half the region has climates outside the range of the training data, almost all of it in the lowlands, and the models agree that *S. acaule* loses suitable climate on the lower slopes and gains it on the highest ground.
+
+Notes for coding assignment 5:
+
+* `cmip6_world()` names its layers `bio01`, `bio02`, and so on. Rename them to match your training data before you call `predict()`.
+* `pa_evaluate(p, a)` returns AUC in `@stats$auc`. `ecospat.boyce(fit, obs)` needs the prediction in every cell of the map (`fit`) and at the test presences (`obs`), and returns the index in `$cor`.
+* `mess(future, training data)` marks where the projection extrapolates. With `full = TRUE`, the per-variable scores show which variable is responsible.
+* When you compare models, compare where each one gains and loses, not its raw values.
