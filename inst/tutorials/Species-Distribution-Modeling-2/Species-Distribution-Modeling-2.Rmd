@@ -69,13 +69,17 @@ Some variables are computed directly from others. bio7 is bio5 minus bio6, and b
 Let's read the records and the rasters and extract all 19 variables at each record.
 
 ```{r occ-env, exercise=TRUE}
+# read the cleaned records from Part 1
 acclean <- read.csv("data/acaule_clean.csv")
+# read the climate rasters
 bio <- rast("data/andes_bioclim_5m.tif")
 
+# convert the records to points
 pts <- vect(acclean, geom = c("lon", "lat"), crs = "EPSG:4326")
 
 # climate at each record; ID = FALSE drops the point ID column
 occ <- extract(bio, pts, ID = FALSE)
+# check the number of rows and columns
 dim(occ)
 
 # any records without climate values?
@@ -91,9 +95,13 @@ Correlated predictors cause two problems. They make model coefficients unstable,
 Collinearity is a property of the predictors across the whole region the model sees, not only at the records. The models in Part 3 are fit to the presences plus background points spread across the region. The background points far outnumber the presences, so collinearity across the region is what affects those models' coefficients. For now, a random sample of 5,000 cells stands in for the background, as in Part 1. A method fit to the presences alone, such as Mahalanobis distance, would check collinearity at the occurrence records instead.
 
 ```{r avail-sample, exercise=TRUE, exercise.setup="occ-env"}
+# make the random sample repeatable
 set.seed(698)
+# sample all 19 variables at 5,000 random cells
 avail <- spatSample(bio, 5000, method = "random", na.rm = TRUE)
+# check the number of rows and columns
 dim(avail)
+# show the first rows and columns
 head(avail[, 1:6])
 ```
 
@@ -102,7 +110,9 @@ The variance inflation factor (VIF) measures how much the variance of a regressi
 Let's give `vifstep()` all 19 variables and see what it keeps.
 
 ```{r vif-all, exercise=TRUE, exercise.setup="avail-sample"}
+# remove variables step by step until every VIF is below 10
 vs_all <- vifstep(avail, th = 10)
+# print the result
 vs_all
 
 # the variables it removed, in the order it removed them
@@ -131,11 +141,16 @@ bio8 is the mean temperature of the wettest quarter, and bio9 is the mean temper
 ```{r quarter-maps, exercise=TRUE, exercise.setup="avail-sample", fig.width=9, fig.height=4}
 # central Chile and Argentina
 win <- ext(-75, -55, -42, -25)
+# crop three variables to the window
 z <- crop(bio[[c("bio1", "bio8", "bio9")]], win)
 
+# put three plots side by side
 par(mfrow = c(1, 3))
+# map bio1
 plot(z[["bio1"]], main = "bio1: annual mean temperature")
+# map bio8
 plot(z[["bio8"]], main = "bio8: wettest quarter")
+# map bio9
 plot(z[["bio9"]], main = "bio9: driest quarter")
 ```
 
@@ -144,7 +159,9 @@ bio1 changes smoothly. bio8 and bio9 have sharp edges, for example along the nor
 ```{r quarter-cells, exercise=TRUE, exercise.setup="quarter-maps"}
 # three neighboring 5' cells at 38 degrees S
 three <- cbind(lon = c(-68.79, -68.71, -68.63), lat = c(-38.04, -38.04, -38.04))
+# read bio1 at the three cells
 extract(bio[["bio1"]], three)
+# read bio8 at the three cells
 extract(bio[["bio8"]], three)
 ```
 
@@ -164,6 +181,7 @@ Annual mean temperature is about 15 °C in all three cells, but bio8 jumps from 
 Let's check the candidates against the records.
 
 ```{r cand-records, exercise=TRUE, exercise.setup="quarter-cells"}
+# the candidate predictors
 cand <- c("bio2", "bio5", "bio6", "bio12", "bio15", "bio17")
 
 # climate at the records for the candidate variables
@@ -190,11 +208,14 @@ quiz(
 Before computing VIF, let's look at the pairwise correlations among the candidates across the region. The lecture suggested treating correlations stronger than about 0.7 (positive or negative) as a problem.
 
 ```{r cand-cor, exercise=TRUE, exercise.setup="cand-records"}
+# calculate the correlations among the candidates
 r <- cor(avail[, cand])
+# print the correlations
 round(r, 2)
 
 # pairs with |r| > 0.7
 high <- which(abs(r) > 0.7 & upper.tri(r), arr.ind = TRUE)
+# list those pairs and their correlations
 data.frame(var1 = rownames(r)[high[, 1]], var2 = colnames(r)[high[, 2]],
            r = round(r[high], 2))
 ```
@@ -204,7 +225,9 @@ Four pairs pass 0.7, and two more (bio5 with bio6, and bio15 with bio17) fall ju
 A dendrogram groups the variables by how strongly they are correlated. Here the distance between two variables is 1 - |r|, so variables that join low on the tree are strongly correlated.
 
 ```{r cand-dendro, exercise=TRUE, exercise.setup="cand-cor", fig.height=5}
+# cluster the variables, treating 1 - |r| as distance
 clus <- hclust(as.dist(1 - abs(r)))
+# plot the dendrogram
 plot(clus, hang = -1, main = "Candidate predictors", xlab = "", sub = "",
      ylab = "1 - |r|")
 ```
@@ -216,8 +239,10 @@ bio2 and bio6 join lowest on the tree, so they are the most strongly correlated 
 Correlations look at two variables at a time. VIF looks at each variable against all the others together.
 
 ```{r cand-vif, exercise=TRUE, exercise.setup="cand-dendro"}
+# calculate the VIF of each candidate
 vif(avail[, cand])
 
+# remove candidates step by step until every VIF is below 10
 vifstep(avail[, cand], th = 10)
 ```
 
@@ -228,7 +253,9 @@ But removing bio6 throws out the best measure of winter cold in the stack. A hig
 Edit the code below to drop bio2 instead of bio6, and check that every remaining VIF is below 10.
 
 ```{r final-vif, exercise=TRUE, exercise.setup="cand-vif"}
+# list your final predictors
 final <- c(____)
+# check the VIF of the final set
 vif(avail[, final])
 ```
 
@@ -238,7 +265,9 @@ vif(avail[, final])
 ```
 
 ```{r final-vif-solution}
+# the final predictors
 final <- c("bio5", "bio6", "bio12", "bio15", "bio17")
+# check the VIF of the final set
 vif(avail[, final])
 ```
 

@@ -53,8 +53,11 @@ myRast <- terra::rast(ncol=10, nrow=10, xmax=-80, xmin=-150, ymin=20, ymax=60)
 ```
 
 ```{r raster-from-scratch-1-exercise-1-solution}
+# print a summary of the raster
 print(myRast)
+# check the class of the object
 class(myRast)
+# plot the raster
 plot(myRast)
 ```
 
@@ -105,14 +108,16 @@ First, `rast` assigned a coordinate system to `myRast` because the x-y coordinat
 Second, the plot of `myRast` is blank because it contains no values - so let's add some data! We will assign 100 random values to fill the cells in the raster - but first let's confirm whether the cells in `myRast` contain data values or are empty (we already know the answer, this is for demonstration).
 
 ```{r check-raster-values-1, exercise=TRUE, exercise.eval = T, exercise.lines = 4, exercise.setup = "raster-from-scratch-1"}
+# check whether the cells hold values
 terra::hasValues(myRast)
 ```
 
 Let's now add random data using `runif` and add the same number of values as the number of cells in the raster (100).
 
-```{r check-raster-values-2, exercise=TRUE, exercise.eval = T, exercise.lines = 6, exercise.setup = "raster-from-scratch-1"}
+```{r check-raster-values-2, exercise=TRUE, exercise.eval = T, exercise.lines=8, exercise.setup = "raster-from-scratch-1"}
 # add random values to r
 set.seed(809)
+# give each cell a random value between 0 and 1
 values(myRast) <- runif(n=ncell(myRast))
 
 # confirm that the raster now has values
@@ -122,6 +127,7 @@ terra::hasValues(myRast)
 Now that we have added data to the raster, let's plot it again.
 
 ```{r check-raster-values-3, exercise=TRUE, exercise.eval = T, exercise.lines = 3, exercise.setup = "check-raster-values-2"}
+# plot the raster
 plot(myRast)
 ```
 
@@ -188,6 +194,7 @@ myRast3 <- myRast2 <- myRast
 
 # add random values to each raster
 values(myRast2) <- runif(ncell(myRast))
+# do the same for the third raster
 values(myRast3) <- runif(ncell(myRast))
 
 # create a stack
@@ -247,7 +254,7 @@ grade_code()
 
 We can also subset a raster stack by layer number or name. For example, to extract the first raster in the stack, we can use `rrr[[1]]` or `rrr[["myRast1"]]`. We can also use functions like `subset` to extract a subset of the raster stack based on a condition. 
 
-```{r rast-stack-subset, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "raster-stacks-2"}
+```{r rast-stack-subset, exercise=TRUE, exercise.eval = T, exercise.lines=18, exercise.setup = "raster-stacks-2"}
 # extract r1 from rrr
 r1 <- rrr[[1]]
 # or
@@ -285,7 +292,7 @@ plot(elev)
 
 We can save the raster `elev` to disk using the `writeRaster` function, but before we do that, lets perform some raster algebra to create some new raster objects and create a raster stack. You can perform raster algebra using the standard arithmetic operators in `R` (e.g., `+`, `-`, `*`, `/`, `^`) using numbers or other rasters.
 
-```{r raster-algebra, exercise=TRUE, exercise.eval = T, exercise.lines = 15, exercise.setup = "raster-file-read"}
+```{r raster-algebra, exercise=TRUE, exercise.eval = T, exercise.lines=21, exercise.setup = "raster-file-read"}
 # create a new raster object by adding 100 to the values in elev
 elev100 <- elev*100
 
@@ -294,19 +301,23 @@ elev2 <- elev * elev
 
 # plot the new rasters
 par(mfrow=c(1,3)) # divide plot window into 1 row, 3 cols
+# plot the original elevation
 plot(elev, main="elev")
+# plot elevation multiplied by 100
 plot(elev100, main="elev * 100")
+# plot elevation squared
 plot(elev2, main=expression(elev^2))
 
 # make a stack of the new rasters
 elevStack <- c(elev, elev100, elev2)
 
+# print a summary of the multilayer raster
 elevStack
 ```
 
 Note that we can save both rasters and raster stacks to a single file, in this case as GeoTiffs.
 
-```{r raster-file-save, exercise=TRUE, exercise.eval = T, exercise.lines = 5, exercise.setup = "raster-algebra"}
+```{r raster-file-save, exercise=TRUE, exercise.eval = T, exercise.lines=8, exercise.setup = "raster-algebra"}
 # save elev to disk
 # written to tempdir() so the tutorial doesn't write into your working directory
 terra::writeRaster(elev, file.path(tempdir(), "elev.tif"), overwrite=TRUE)
@@ -348,14 +359,18 @@ elev_smooth <- terra::focal(elev, w = 3, fun = "mean")
 
 # compare the original and the smoothed version
 par(mfrow=c(1,2))
+# plot the original elevation
 plot(elev, main = "elev")
+# plot the smoothed elevation
 plot(elev_smooth, main = "focal: 3x3 mean")
 ```
 
 ```{r zonal-global-op, exercise=TRUE, exercise.eval = T, exercise.lines = 15, exercise.setup = "raster-file-read"}
 # create a simple zone raster by splitting elev into 3 equal-width classes
 zones <- elev
+# split elevation into 3 equal-width groups and store the group numbers
 values(zones) <- as.integer(cut(values(elev)[,1], breaks = 3))
+# plot the zones
 plot(zones, main = "elevation zones")
 
 # ZONAL: mean elev within each zone
@@ -380,7 +395,9 @@ elev_class <- terra::classify(elev, rcl)
 
 # compare the original and the classified version
 par(mfrow=c(1,2))
+# plot the continuous elevation
 plot(elev, main = "elev (continuous)")
+# plot the reclassified elevation
 plot(elev_class, main = "elev reclassified (3 classes)")
 ```
 
@@ -418,6 +435,7 @@ elev_coarse <- terra::aggregate(elev, fact = 4, fun = "mean")
 
 # compare resolution and cell counts
 res(elev)
+# check the new cell size
 res(elev_coarse)
 
 # how many cells did we go from / to?
@@ -425,7 +443,9 @@ c(original = ncell(elev), aggregated = ncell(elev_coarse))
 
 # plot both
 par(mfrow=c(1,2))
+# plot elevation at the original cell size
 plot(elev, main = "elev (original grain)")
+# plot the aggregated elevation
 plot(elev_coarse, main = "aggregate(fact = 4)")
 ```
 
@@ -452,11 +472,14 @@ the tool the raster-stacking breakout activity asks you to reach for.
 # a second raster of the same area "from a different source" - same extent and CRS,
 # but a different resolution, so it does NOT line up with elev
 other <- terra::rast(elev)
+# set a different cell size (this removes the cell values)
 terra::res(other) <- 0.01
+# give each cell a value
 values(other) <- 1:ncell(other)
 
 # the two grids don't match
 res(elev)
+# check the cell size of the resampled raster
 res(other)
 
 # so stacking fails
@@ -467,7 +490,9 @@ other_aligned <- terra::resample(other, elev, method = "bilinear")
 
 # now the grids match and the rasters stack
 res(other_aligned)
+# stack the two rasters, which now line up
 stk <- c(elev, other_aligned)
+# print a summary of the stack
 stk
 ```
 
@@ -487,6 +512,7 @@ records fall in each cell. Note that this is **not** what `rasterize()` does by 
 ```{r rasterize-op, exercise=TRUE, exercise.eval = T, exercise.lines = 30, exercise.setup = "raster-file-read"}
 # make 200 random points inside the extent of elev
 set.seed(809)
+# draw 200 random coordinates inside the extent of elev
 pts <- data.frame(x = runif(200, xmin(elev), xmax(elev)),
                   y = runif(200, ymin(elev), ymax(elev)))
 
@@ -504,11 +530,14 @@ pts_count <- terra::rasterize(pts.v, tmpl, fun = "count")
 
 # compare the value ranges - this is how you tell them apart
 minmax(pts_presence)
+# range of the count raster
 minmax(pts_count)
 
 # plot both
 par(mfrow=c(1,2))
+# plot the default result
 plot(pts_presence, main = "default: presence")
+# plot the count result
 plot(pts_count, main = 'fun = "count"')
 ```
 
@@ -521,8 +550,10 @@ elev_coarse <- terra::aggregate(elev, fact = 20)
 
 # raster cells -> polygons
 elev_poly <- terra::as.polygons(elev_coarse)
+# print a summary of the polygons
 elev_poly
 
+# plot the polygons
 plot(elev_poly, main = "raster cells as polygons")
 ```
 

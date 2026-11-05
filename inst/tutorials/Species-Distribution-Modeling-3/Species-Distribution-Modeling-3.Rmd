@@ -58,29 +58,40 @@ Every method in this tutorial except Mahalanobis distance compares the climate a
 
 We draw 10,000 background points from the whole raster, which covers western South America from the Pacific coast to the Amazon lowlands.
 
-```{r bg-points, exercise=TRUE}
+```{r bg-points, exercise=TRUE, exercise.lines=38}
+# read the cleaned records
 acclean <- read.csv("data/acaule_clean.csv")
+# read the climate rasters
 bio <- rast("data/andes_bioclim_5m.tif")
 vars <- c("bio5", "bio6", "bio12", "bio15", "bio17")   # the predictors from Part 2
+# keep the five predictors
 bioVars <- bio[[vars]]
 
 # climate at the presences
 pres <- data.frame(x = acclean$lon, y = acclean$lat)
+# read the predictors at the presences
 presEnv <- extract(bioVars, pres, ID = FALSE)
 
 # 10,000 random background cells, with their coordinates
 set.seed(698)
+# sample 10,000 background cells and keep their coordinates
 bg <- spatSample(bioVars, size = 10000, method = "random", na.rm = TRUE, xy = TRUE)
 
 # one table: pa = 1 for presences, 0 for background
 sdm <- rbind(data.frame(pa = 1, pres, presEnv),
              data.frame(pa = 0, bg[, c("x", "y")], bg[, vars]))
+# count presences (1) and background points (0)
 table(sdm$pa)
+# show the first rows
 head(sdm, 3)
 
+# make a land mask
 land <- !is.na(bio[["bio1"]])
+# draw the land
 plot(land, col = c(NA, "gray90"), legend = FALSE, main = "Presences and background points")
+# add the background points
 points(sdm[sdm$pa == 0, c("x", "y")], pch = ".", col = "gray40")
+# add the presences
 points(sdm[sdm$pa == 1, c("x", "y")], pch = 20, cex = 0.6, col = "red")
 # legend in the Pacific, at the lower left of the map
 legend(x = -82, y = -33, c("Background", "Presences"), pch = c(15, 20),
@@ -106,7 +117,7 @@ In Part 4 we test the models on data they were not fit to, so we set those data 
 
 `cv_spatial()` from the `blockCV` package divides the region into hexagonal blocks about 300 km across, assigns each block to one of five folds, and returns the fold of every point. We fit the models to folds 2 through 5 and keep fold 1 for testing in Part 4.
 
-```{r blocks, exercise=TRUE, exercise.setup="bg-points"}
+```{r blocks, exercise=TRUE, exercise.lines=32, exercise.setup="bg-points"}
 # cv_spatial() needs an sf object
 sdm.sf <- st_as_sf(sdm, coords = c("x", "y"), crs = 4326, remove = FALSE)
 
@@ -115,19 +126,27 @@ sb <- cv_spatial(x = sdm.sf, column = "pa", k = 5, size = 300000,
                  selection = "random", seed = 698,
                  plot = FALSE, progress = FALSE, report = FALSE)
 
+# store the fold of each point
 sdm$fold <- sb$folds_ids
+# count the points in each fold
 table(fold = sdm$fold, pa = sdm$pa)
 
 # fold 1 for testing, folds 2-5 for training
 train <- subset(sdm, fold != 1)
+# set fold 1 aside for testing
 test <- subset(sdm, fold == 1)
 
+# draw the land
 plot(land, col = c(NA, "gray90"), legend = FALSE, main = "Training and testing presences")
 # all blocks in gray, the fold 1 (test) blocks outlined in red
 plot(st_geometry(sb$blocks), add = TRUE, border = "gray60")
+# outline the blocks in fold 1
 plot(st_geometry(sb$blocks[sb$blocks$folds == 1, ]), add = TRUE, border = "red", lwd = 2)
+# add the training presences
 points(train[train$pa == 1, c("x", "y")], pch = 20, cex = 0.6, col = "blue")
+# add the testing presences
 points(test[test$pa == 1, c("x", "y")], pch = 20, cex = 0.6, col = "red")
+# add a legend
 legend(x = -82, y = -33, c("Training", "Testing (fold 1)"), pch = 20,
        col = c("blue", "red"), bg = "white", cex = 0.8)
 ```
@@ -142,17 +161,22 @@ Mahalanobis distance is the one method here that uses only the presences. It mea
 
 If the climate at the presences is roughly multivariate normal, the squared Mahalanobis distance follows a chi-square distribution with *k* degrees of freedom, where *k* is the number of predictors. `pchisq()` turns each distance into a p-value between 0 and 1: near 1 for cells close to the mean climate of the presences and near 0 for cells far from it.
 
-```{r mahal, exercise=TRUE}
+```{r mahal, exercise=TRUE, exercise.lines=17}
+# keep the predictors at the training presences
 presTrain <- train[train$pa == 1, vars]
 mu <- colMeans(presTrain)    # mean climate at the training presences
 sig <- cov(presTrain)        # covariance of climate at the training presences
+# the number of predictors
 k <- length(vars)
+# print the mean climate
 round(mu, 1)
 
 # app() applies the function to every cell of the raster stack
 mahalPred <- app(bioVars, function(x) {
+  # convert Mahalanobis distance to a p-value with the chi-squared distribution
   pchisq(mahalanobis(x, mu, sig), df = k, lower.tail = FALSE)
 })
+# map the prediction
 plot(mahalPred, main = "Mahalanobis distance (p-value)", range = c(0, 1))
 ```
 
@@ -176,10 +200,14 @@ A GLM for a 0/1 response (`family = binomial` in `glm()`) is logistic regression
 ```{r glm-fit, exercise=TRUE}
 # a quadratic term for each predictor
 glmForm <- as.formula(paste("pa ~", paste0("poly(", vars, ", 2)", collapse = " + ")))
+# print the formula
 glmForm
 
+# fit the logistic regression
 glmMod <- glm(glmForm, family = binomial, data = train)
+# predict probability in every cell
 glmPred <- predict(bioVars, glmMod, type = "response", na.rm = TRUE)
+# map the prediction
 plot(glmPred, main = "GLM (probability)")
 ```
 
@@ -187,20 +215,28 @@ plot(glmPred, main = "GLM (probability)")
 
 To see the shape of a fitted response, vary one predictor across its range and hold the others at their mean at the training presences.
 
-```{r glm-curve, exercise=TRUE, exercise.setup="glm-fit", fig.height=5}
+```{r glm-curve, exercise=TRUE, exercise.lines=23, exercise.setup="glm-fit", fig.height=5}
+# mean of each predictor at the presences
 typical <- colMeans(train[train$pa == 1, vars])
+# make 100 identical rows that hold those means
 nd <- data.frame(t(typical))[rep(1, 100), ]
+# vary bio6 across its range
 nd$bio6 <- seq(min(train$bio6), max(train$bio6), length.out = 100)
+# predict probability for each row
 nd$p <- predict(glmMod, nd, type = "response")
 
+# plot the response curve
 plot(p ~ bio6, data = nd, type = "l", lwd = 2, ylim = c(0, 1),
      xlab = "bio6: minimum temperature of the coldest month (°C)",
      ylab = "Predicted probability", main = "GLM response to bio6")
 
 # mark the peak with dotted lines and print its values
 peak <- nd[which.max(nd$p), ]
+# draw a line from the peak down to the x-axis
 segments(peak$bio6, 0, peak$bio6, peak$p, lty = 3)
+# draw a line from the peak across to the y-axis
 segments(par("usr")[1], peak$p, peak$bio6, peak$p, lty = 3)
+# print the location and height of the peak
 round(peak[, c("bio6", "p")], 2)
 ```
 
@@ -219,13 +255,18 @@ quiz(
 Fill in the formula with linear terms only (the five predictor names joined by `+`), then compare the two curves.
 
 ```{r glm-linear, exercise=TRUE, exercise.setup="glm-curve", fig.height=5}
+# fit the model with linear terms only
 glmLin <- glm(pa ~ ____, family = binomial, data = train)
+# predict from the linear model
 nd$pLin <- predict(glmLin, nd, type = "response")
 
+# plot the response curve
 plot(p ~ bio6, data = nd, type = "l", lwd = 2, ylim = c(0, 1),
      xlab = "bio6: minimum temperature of the coldest month (°C)",
      ylab = "Predicted probability", main = "GLM response to bio6")
+# add its curve as a dashed line
 lines(pLin ~ bio6, data = nd, lwd = 2, lty = 2)
+# add a legend
 legend("topright", c("Quadratic", "Linear"), lty = c(1, 2), lwd = 2, bty = "n")
 ```
 
@@ -234,13 +275,18 @@ glmLin <- glm(pa ~ bio5 + bio6 + ____ + ____ + ____, family = binomial, data = t
 ```
 
 ```{r glm-linear-solution}
+# fit the model with linear terms only
 glmLin <- glm(pa ~ bio5 + bio6 + bio12 + bio15 + bio17, family = binomial, data = train)
+# predict from the linear model
 nd$pLin <- predict(glmLin, nd, type = "response")
 
+# plot the response curve
 plot(p ~ bio6, data = nd, type = "l", lwd = 2, ylim = c(0, 1),
      xlab = "bio6: minimum temperature of the coldest month (°C)",
      ylab = "Predicted probability", main = "GLM response to bio6")
+# add its curve as a dashed line
 lines(pLin ~ bio6, data = nd, lwd = 2, lty = 2)
+# add a legend
 legend("topright", c("Quadratic", "Linear"), lty = c(1, 2), lwd = 2, bty = "n")
 ```
 
@@ -251,6 +297,7 @@ legend("topright", c("Quadratic", "Linear"), lty = c(1, 2), lwd = 2, bty = "n")
 `maxnet()` from the `maxnet` package fits MaxEnt in R. The original MaxEnt is a separate Java program, and older R code calls it through `dismo::maxent()`, which needs Java installed; `maxnet()` needs no extra software. It needs a vector of 1s and 0s (presences and background) and a data frame of predictors. With 80 or more training presences, `maxnet()` builds linear, quadratic, product, and hinge features from the predictors. Regularization then shrinks the coefficients of most features to zero.
 
 ```{r maxnet-fit, exercise=TRUE}
+# fit MaxEnt with the default settings
 mx <- maxnet(p = train$pa, data = train[, vars])
 
 # features with nonzero coefficients after regularization
@@ -259,6 +306,7 @@ length(mx$betas)
 # cloglog output, the default in MaxEnt 3.4 and later
 mxPred <- predict(bioVars, mx, fun = function(m, d) predict(m, d, type = "cloglog"),
                   na.rm = TRUE)
+# map the prediction
 plot(mxPred, main = "MaxEnt (cloglog)")
 ```
 
@@ -269,6 +317,7 @@ The map is highest along the Andes from central Peru to northwestern Argentina, 
 `plot()` on a fitted `maxnet` model draws one response curve per predictor. Each curve varies one predictor and holds the others at their mean at the presences. The x-axis runs 10% past the range of the training data at each end; the flat stretches at the ends are where the model holds its prediction constant outside that range.
 
 ```{r maxnet-curves, exercise=TRUE, exercise.setup="maxnet-fit", fig.width=9, fig.height=6}
+# plot the response curves
 plot(mx, type = "cloglog")
 ```
 
@@ -297,14 +346,20 @@ quiz(
 Set `regmult` to 5 and compare the number of features and the curves with the model above.
 
 ```{r maxnet-regmult, exercise=TRUE, exercise.setup="maxnet-fit", fig.width=9, fig.height=6}
+# fit MaxEnt with a higher regularization multiplier
 mx5 <- maxnet(p = train$pa, data = train[, vars], regmult = ____)
+# count the features the model kept
 length(mx5$betas)
+# plot the response curves
 plot(mx5, type = "cloglog")
 ```
 
 ```{r maxnet-regmult-solution}
+# fit MaxEnt with a higher regularization multiplier
 mx5 <- maxnet(p = train$pa, data = train[, vars], regmult = 5)
+# count the features the model kept
 length(mx5$betas)
+# plot the response curves
 plot(mx5, type = "cloglog")
 ```
 
@@ -316,34 +371,43 @@ A random forest grows many classification trees, each on a bootstrap sample of t
 
 Let's fit both versions. `sampsize` sets how many points of each class each tree draws.
 
-```{r rf-fit, exercise=TRUE}
+```{r rf-fit, exercise=TRUE, exercise.lines=27}
+# count the training presences
 nPres <- sum(train$pa == 1)
 
 # default: each tree draws a bootstrap sample of all points
 set.seed(698)
+# fit a random forest with the default settings
 rfDef <- randomForest(x = train[, vars], y = factor(train$pa), ntree = 500)
 
 # down-sampled: each tree draws nPres background points and nPres presences
 set.seed(698)
+# fit a down-sampled random forest
 rfBal <- randomForest(x = train[, vars], y = factor(train$pa), ntree = 500,
                       sampsize = c("0" = nPres, "1" = nPres))
 
 # out-of-bag confusion matrices: rows are the observed class (0 = background)
 rfDef$confusion
+# print its confusion matrix
 rfBal$confusion
 
 # percent of each class misclassified out of bag
 err <- round(100 * cbind(default = rfDef$confusion[, "class.error"],
                          down_sampled = rfBal$confusion[, "class.error"]))
+# label the rows
 rownames(err) <- c("background (0)", "presence (1)")
+# print the error rates
 err
 ```
 
 **Reading the output.** In a confusion matrix, rows are the observed class and columns are the class the forest predicted. `class.error` is the share of each row the forest got wrong, and the last table shows it as a percentage. The default forest misclassifies nearly 40% of the training presences out of bag, but only 3% of the background points. The down-sampled forest misclassifies about 6% of the presences and 8% of the background points. Trading some background errors for far fewer presence errors is the point: background points are not absences, and some of them have the same climate as the presences. (Your numbers for the default forest may differ slightly from these, depending on your computer.)
 
 ```{r rf-maps, exercise=TRUE, exercise.setup="rf-fit", fig.width=9, fig.height=5}
+# map the probability of presence from the default forest
 rfDefPred <- predict(bioVars, rfDef, type = "prob", index = 2, na.rm = TRUE)
+# map the probability of presence from the down-sampled forest
 rfPred <- predict(bioVars, rfBal, type = "prob", index = 2, na.rm = TRUE)
+# plot the two maps
 plot(c(rfDefPred, rfPred), main = c("Default", "Down-sampled"), range = c(0, 1))
 ```
 
@@ -352,6 +416,7 @@ plot(c(rfDefPred, rfPred), main = c("Default", "Down-sampled"), range = c(0, 1))
 Variable importance in a random forest measures how much each predictor improves the trees' splits, summed over all splits that use it and averaged across trees.
 
 ```{r rf-importance, exercise=TRUE, exercise.setup="rf-fit", fig.height=4}
+# plot variable importance
 varImpPlot(rfBal, type = 2, main = "Down-sampled random forest")
 ```
 
@@ -365,8 +430,10 @@ Boosted regression trees add small trees one at a time, and each new tree is fit
 
 This exercise takes about 30-40 seconds.
 
-```{r brt-fit, exercise=TRUE, exercise.timelimit=180, fig.height=4}
+```{r brt-fit, exercise=TRUE, exercise.lines=17, exercise.timelimit=180, fig.height=4}
+# make the fit repeatable
 set.seed(698)
+# fit boosted regression trees, choosing the number of trees by cross-validation
 brt <- dismo::gbm.step(data = train, gbm.x = vars, gbm.y = "pa", family = "bernoulli",
                        tree.complexity = 3, learning.rate = 0.01, bag.fraction = 0.75,
                        plot.main = FALSE, silent = TRUE, verbose = FALSE)
@@ -377,6 +444,7 @@ brt$gbm.call$best.trees
 # relative influence of each predictor (percent)
 summary(brt, las = 1)
 
+# predict from the best number of trees
 brtPred <- predict(bioVars, brt, n.trees = brt$gbm.call$best.trees,
                    type = "response", na.rm = TRUE)
 ```
@@ -399,8 +467,11 @@ quiz(
 Fitting all five models again takes about a minute, so the five maps from the exercises above are saved in `data/acaule_predictions.tif`.
 
 ```{r compare, exercise=TRUE, fig.width=12, fig.height=3.6}
+# read the five saved prediction maps
 preds <- rast("data/acaule_predictions.tif")
+# list the models
 names(preds)
+# plot the five maps in a row
 plot(preds, nc = 5, range = c(0, 1))
 
 # correlations between the five maps across all land cells

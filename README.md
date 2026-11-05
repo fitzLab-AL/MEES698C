@@ -28,6 +28,7 @@ run_tutorial("Species-Distribution-Modeling-1")
 run_tutorial("Species-Distribution-Modeling-2")
 run_tutorial("Species-Distribution-Modeling-3")
 run_tutorial("Species-Distribution-Modeling-4")
+run_tutorial("Connectivity-and-Spread")
 ```
 
 This opens the tutorial in your browser or the RStudio Viewer pane, running entirely on your

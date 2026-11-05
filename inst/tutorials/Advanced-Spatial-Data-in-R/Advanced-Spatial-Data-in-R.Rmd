@@ -86,6 +86,7 @@ unique(karri$geodeticDatum)
 ```{r karri-sf-solution}
 # use dplyr::select to select only the columns we need
 karri.sf <- karri %>%
+  # keep only these columns
   select(species, country, lon, lat, year, coordinateUncertaintyInMeters)
 
 # convert to sf object
@@ -116,7 +117,7 @@ sf::st_crs(karri.sf) <- 4326
 
 Next, let's do a bit more cleaning to remove duplicates, which can be common with GBIF data, and points with low coordinate precision or NAs. To check the data, we will use `ggplot` to produce a global map of the records with countries in the background.
 
-```{r karri-clean, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup = "karri-clean-0"}
+```{r karri-clean, exercise=TRUE, exercise.lines=20, exercise.eval = T, exercise.setup = "karri-clean-0"}
 # remove duplicates
 karri.sf <- karri.sf[!duplicated(karri.sf),]
 
@@ -128,9 +129,13 @@ karri.sf <- dplyr::filter(karri.sf, coordinateUncertaintyInMeters < 10000)
 
 # plot the data
 world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+# start an empty plot
 ggplot() +
+  # draw the world map
   geom_sf(data = world) +
+  # add the karri records, colored by species
   geom_sf(data = karri.sf, aes(color = species)) +
+  # use a plain background
   theme_minimal()
 ```
 
@@ -187,8 +192,11 @@ karri.sw <- sf::st_intersection(karri.sf, swPolyProj)
 
 #plot the data using ggplot
 ggplot() +
+  # draw the southwest polygon
   geom_sf(data = swPolyProj) +
+  # add the karri records inside the polygon
   geom_sf(data = karri.sw, aes(color = species)) +
+  # use a plain background
   theme_minimal()
 ```
  
@@ -211,7 +219,7 @@ karri.sw <- sf::st_intersection(karri.sf, swPolyProj)
 
 Next, we will download and work with raster data. We will use the `geodata` package to download global bioclimatic variables at 10 arc-minute resolution from the [WorldClim](http://worldclim.org) database. We will then crop these data to the extent of Australia and extract values for the karri records. 
 
-```{r download-raster, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup = "transform-swPoly"}
+```{r download-raster, exercise=TRUE, exercise.lines=19, exercise.eval = T, exercise.setup = "transform-swPoly"}
 # download the global bioclim rasters at 10 arc-minute resolution.
 # NOTE: worldclim_global() takes var/res/path - there is no country argument,
 # so this downloads the global dataset, which we crop to Australia below.
@@ -315,23 +323,30 @@ stack. `terra::spatSample()` does exactly this. The sample stands in for the ava
 # a random sample of the climate available across Australia.
 # na.rm = TRUE avoids drawing cells in the ocean, which have no data.
 set.seed(809)
+# sample the climate at 5,000 random cells, skipping empty cells
 bgClim <- terra::spatSample(ausBioclim, size = 5000, method = "random", na.rm = TRUE)
 
 # how many did we get, and what does it look like?
 dim(bgClim)
+# show the first rows and columns
 head(bgClim[, 1:4])
 
 # compare karri's climate (red) to Australia's climate generally (black)
 par(mfrow = c(1, 2))
 
+# plot the distribution of temperature across Australia
 plot(density(bgClim$bio1), col = "black", main = "bio1: mean annual temperature",
      xlab = "degrees C")
+# add the distribution of temperature at the karri records
 lines(density(karri.bioclim$bio1), col = "red")
+# add a legend
 legend("topright", legend = c("Australia", "karri"), col = c("black", "red"),
        lwd = 2, bty = "n", cex = 0.8)
 
+# plot the distribution of precipitation across Australia
 plot(density(bgClim$bio12), col = "black", main = "bio12: annual precipitation",
      xlab = "mm")
+# add the distribution of precipitation at the karri records
 lines(density(karri.bioclim$bio12), col = "red")
 ```
 
@@ -342,16 +357,19 @@ If you need background *locations* rather than just values (which you will when 
 species distribution models), ask `spatSample()` for the coordinates as well:
 
 ```{r background-points, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup = "extract-raster"}
+# make the random sample repeatable
 set.seed(809)
 
 # xy = TRUE returns the cell coordinates alongside the values
 bgPts <- terra::spatSample(ausBioclim, size = 500, method = "random",
                            na.rm = TRUE, xy = TRUE)
 
+# show the first rows and columns
 head(bgPts[, 1:4])
 
 # those coordinates can be turned straight into an sf object
 bg.sf <- sf::st_as_sf(bgPts, coords = c("x", "y"), crs = sf::st_crs(ausBioclim))
+# print the sf object
 bg.sf
 ```
 

@@ -43,6 +43,7 @@ In this first exercise, we will demonstrate the difference between Geographic an
 ```{r define-crs-1, exercise=TRUE, exercise.lines = 10, exercise.eval = T}
 # create a simple point in London
 london <- data.frame(lon = -0.1, lat = 51.5) %>% 
+  # convert the data frame to an sf object, using lon and lat as coordinates
   sf::st_as_sf(coords = c("lon", "lat"))
 
 # check the CRS of the point
@@ -265,7 +266,7 @@ quiz(
     allow_retry = TRUE))
 ```
 
-```{r interp-method, exercise=TRUE, exercise.lines = 15, exercise.eval = T}
+```{r interp-method, exercise=TRUE, exercise.lines=28, exercise.eval = T}
 # load nlcd raster
 nlcd <- terra::rast("data/nlcd.tif")
 
@@ -283,7 +284,9 @@ nlcd.bilin <- terra::project(nlcd, "EPSG:4326", method="bilinear")
 
 # plot the projected rasters
 par(mfrow=c(1,2))
+# plot the result of nearest neighbor interpolation
 plot(nlcd.near, main = "nearest neighbor")
+# plot the result of bilinear interpolation
 plot(nlcd.bilin, main = "bilinear")
 #
 # print the nlcd.near raster
@@ -296,7 +299,7 @@ print(nlcd.bilin)
 The `project` function in the `terra` package allows us to transform a raster using a template raster, which is the preferred method when possible. The template raster provides the new dimensions, extent, and resolution of the output raster. This is useful when we want to transform a raster to match the dimensions of another raster.
 
 
-```{r transform-using-rast-template, exercise=TRUE, exercise.lines = 15, exercise.setup="interp-method", exercise.eval = T}
+```{r transform-using-rast-template, exercise=TRUE, exercise.lines=37, exercise.setup="interp-method", exercise.eval = T}
 # create a new raster `a`
 a <- rast(ncols=40, nrows=40, xmin=-110, xmax=-90, ymin=40, ymax=60, crs="EPSG:4326")
 
@@ -329,7 +332,9 @@ print(a.proj.bTemplate)
 
 # plot the projected rasters
 par(mfrow=c(1,2))
+# plot the raster projected to the new CRS
 plot(a.proj, main = "projected using new CRS")
+# plot the raster projected to match raster b
 plot(a.proj.bTemplate, main = "projected using template raster b")
 ```
 

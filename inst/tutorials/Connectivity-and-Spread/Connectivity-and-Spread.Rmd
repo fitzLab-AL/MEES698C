@@ -1,0 +1,653 @@
+---
+title: "Connectivity and Spatial Spread"
+output:
+  learnr::tutorial:
+    css: css/custom.css
+    progressive: true
+    allow_skip: true
+runtime: shiny_prerendered
+---
+
+```{r setup, include=FALSE}
+library(learnr)
+library(terra)
+library(sf)
+library(igraph)
+library(gradethis)
+# 'hold' keeps all output after all code. Without it, knitr splits a pre-evaluated
+# exercise chunk's source at each point output is printed, and learnr's editor
+# concatenates those fragments with no newline - which welds them together.
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, results = 'hold',
+                      fig.show = 'hold', exercise.lines = 15, fig.align = "center",
+                      fig.width = 7, fig.height = 6)
+gradethis::gradethis_setup()
+tutorial_options(exercise.completion = FALSE, exercise.timelimit = 60)
+
+# Florida panther data from Fletcher & Fortin (2018), Chapter 9
+land <- rast("data/panther_landcover.tif")
+pub <- st_read("data/panther_publicland.gpkg", quiet = TRUE)
+rc <- read.csv("data/resistance_table.csv")
+cost <- classify(land, as.matrix(rc[, c("Landcover", "Resistance")]))
+cents <- st_coordinates(st_centroid(st_geometry(pub)))
+rownames(cents) <- pub$name
+
+# The full landscape as a transition layer (Exercise 2)
+tr <- gdistance::transition(1 / raster::raster(cost), transitionFunction = mean, directions = 8)
+tr <- gdistance::geoCorrection(tr, type = "c", multpl = FALSE)
+
+# The two refuges in Exercises 3 and 4, cropped to run quickly
+fpnwr <- cents["FLORIDA PANTHER NWR", ]
+ossf <- cents["OKALOACOOCHEE SLOUGH SF", ]
+sub <- crop(cost, ext(642000, 683000, 237000, 298000))
+trSub <- gdistance::transition(1 / raster::raster(sub), transitionFunction = mean, directions = 8)
+trSub <- gdistance::geoCorrection(trSub, type = "c", multpl = FALSE)
+lcp <- st_as_sf(gdistance::shortestPath(trSub, fpnwr, ossf, output = "SpatialLines"))
+st_crs(lcp) <- st_crs(pub)
+
+# Snail kite data from the same chapter (Exercise 5)
+nodes <- read.csv("data/kite_nodes.csv")
+kiteObs <- as.matrix(read.csv("data/kite_movement.csv", row.names = 1))
+diag(kiteObs) <- 0   # the diagonal counts birds that stayed in a wetland
+kiteDist <- as.matrix(dist(nodes[, c("XCoord", "YCoord")])) / 1000   # km
+kiteXY <- as.matrix(nodes[, c("XCoord", "YCoord")])
+
+# A 2 km version of the landscape for the spread model (Exercise 7)
+land2 <- aggregate(land, 4, modal, na.rm = TRUE)
+cost2 <- classify(land2, as.matrix(rc[, c("Landcover", "Resistance")]))
+hab <- 1 / as.matrix(cost2, wide = TRUE)          # establishment probability
+hab[as.matrix(land2, wide = TRUE) == 27] <- 0     # open water: no establishment
+hab[is.na(hab)] <- 0
+habUniform <- hab
+habUniform[hab > 0] <- mean(hab[hab > 0])         # same mean, no variation
+start <- as.vector(rowColFromCell(cost2, cellFromXY(cost2, cents["OKALOACOOCHEE SLOUGH SF", , drop = FALSE])))
+```
+
+## Overview
+
+This tutorial follows Chapter 9 of Fletcher and Fortin (2018), and adds a simple spread model. There is no coding assignment on this topic. The tutorial explains the concepts as you apply them to data.
+
+The first four exercises ask where Florida panthers could move among protected areas in south Florida. You will build a resistance surface, compare effective distances, map a least-cost path and corridor, and use circuit theory to map flow across all routes. Exercise 5 moves to a patch network for the snail kite. Exercise 6 fits dispersal kernels to the kite movements, and Exercise 7 simulates spread on the panther landscape.
+
+By the end of this tutorial you should be able to build a resistance surface and a transition layer, calculate and interpret least-cost and circuit-based connectivity, explain why redundant routes lower resistance, compute network metrics with `igraph`, compare dispersal kernels, and explain how long-distance dispersal changes the rate of spread.
+
+**A note on packages.** `gdistance` is built on the older `raster` package, so it needs a `raster` object as input. We keep `terra` as the course's raster package. We use `raster::raster()` to convert a `terra` raster to the format `gdistance` requires, and `rast()` to convert the results back to `terra`. We also call `gdistance` functions with `gdistance::` and do not attach the package, because attaching it would also attach `raster`, whose functions would mask `terra`'s.
+
+## Exercise 1 - A resistance surface
+
+The land cover raster has a 500 m resolution and 43 classes. The table `rc` assigns each class a resistance value from Kautz et al. (2006), who derived the values from habitat selection by radio-collared panthers. The lower the value, the easier we assume the cover is to cross.
+
+Kautz, R., et al. 2006. How much is enough? Landscape-scale conservation for the Florida panther. *Biological Conservation* 130:118-133.
+
+The table `rc` has one row for each land cover class. These are its first rows. `Landcover` is the class code in the raster, and `Resistance` is the value we assign to that class.
+
+```{r rc-table}
+knitr::kable(head(rc))
+```
+
+`classify()` takes a two-column matrix of old and new values, so we give it the `Landcover` and `Resistance` columns.
+
+```{r resist, exercise=TRUE}
+# replace each land cover code with its resistance
+cost <- classify(land, as.matrix(rc[, c("Landcover", "Resistance")]))
+
+# map resistance
+plot(cost, col = hcl.colors(11, "YlOrBr", rev = TRUE), main = "Resistance")
+# add the protected areas
+plot(st_geometry(pub), add = TRUE)
+# add their centroids
+points(cents, pch = 21, bg = "white")
+```
+
+**Reading the output.** The lightest areas (resistance 1-3) are hardwood forest, pineland, and cypress swamp, which are concentrated in the southwest. Lake Okeechobee and the ocean are dark because open water has a resistance of 10, and coastal wetland, at 11, has the highest value in the table.
+
+```{r resist-quiz}
+quiz(
+  question("Kautz et al. derived these values from habitat selection. Which is the main risk of using them as movement costs?",
+    answer("Habitat selection cannot be estimated from telemetry data."),
+    answer("An animal may cross cover that it would not choose to live in, so selection may overstate the cost of crossing it.", correct = TRUE),
+    answer("Resistance values must be integers."),
+    allow_retry = TRUE,
+    correct = "Right. Resistance values are a hypothesis about movement. It is good practice to check how much your answer changes when you change them."))
+```
+
+## Exercise 2 - Effective distance
+
+A transition layer turns the raster into a network. Each cell is a node, and each link between neighboring cells has a conductance, the inverse of resistance. `geoCorrection()` adjusts for diagonal links, which are longer than the links between side-by-side cells. This code takes about 5 seconds.
+
+```{r effdist, exercise=TRUE, exercise.lines=39}
+# build the network: conductance between each cell and its 8 neighbors
+tr <- gdistance::transition(1 / raster::raster(cost), transitionFunction = mean, directions = 8)
+# correct for diagonal links, which are longer
+tr <- gdistance::geoCorrection(tr, type = "c", multpl = FALSE)
+
+euclid <- dist(cents) / 1000                       # km
+# least-cost distance between each pair of centroids
+leastCost <- gdistance::costDistance(tr, cents) / 1000
+
+# short names for the protected areas
+short <- c("Babcock", "Big Cypress", "OSSF", "Kissimmee", "FPNWR")
+# label the Euclidean distances
+m <- as.matrix(euclid); dimnames(m) <- list(short, short)
+# print the distances
+round(m)
+# label the least-cost distances
+m <- as.matrix(leastCost); dimnames(m) <- list(short, short)
+# print the distances
+round(m)
+# correlate the two distances
+cor(c(euclid), c(leastCost))
+
+# plot one point for each pair of protected areas
+plot(c(euclid), c(leastCost), pch = 16, xlab = "Euclidean distance (km)",
+     ylab = "Least-cost distance (thousands of cost units)")
+
+# highlight the two pairs discussed below: FPNWR is row 5, Big Cypress is 2, and OSSF is 3
+eMat <- as.matrix(euclid)
+# least-cost distances as a matrix
+lMat <- as.matrix(leastCost)
+# Euclidean distance for the two pairs
+x <- c(eMat[5, 2], eMat[5, 3])
+# least-cost distance for the two pairs
+y <- c(lMat[5, 2], lMat[5, 3])
+# draw the two pairs in red
+points(x, y, pch = 16, col = "firebrick", cex = 1.6)
+# label them
+text(x, y, labels = c("FPNWR-Big Cypress", "FPNWR-OSSF"), pos = 4, col = "firebrick")
+```
+
+**Reading the output.** Euclidean and least-cost distances correlate at r = 0.97, as in the book (Fig. 9.7). The correlation is strong, but look at the two red points. The Florida Panther NWR (FPNWR) is 41 km from both Big Cypress and Okaloacoochee Slough State Forest (OSSF), yet the least-cost distance is 63 to Big Cypress and 86 to OSSF. A plan that treated those two connections as equal would miss that difference. The units of least-cost distance are not kilometers: they are cumulative resistance multiplied by distance.
+
+## Exercise 3 - A least-cost path and corridor
+
+We now focus on FPNWR and OSSF, on a cropped raster. `trSub` is the transition layer for the cropped raster, and `fpnwr` and `ossf` hold the centroids.
+
+```{r lcp, exercise=TRUE, exercise.lines=17, fig.width=5, fig.height=6.5}
+# find the least-cost path and convert it to sf
+lcp <- st_as_sf(gdistance::shortestPath(trSub, fpnwr, ossf, output = "SpatialLines"))
+# assign the CRS of the protected areas
+st_crs(lcp) <- st_crs(pub)
+# length of the path
+st_length(lcp)
+
+# resistance of the cells that the path crosses
+table(extract(sub, vect(lcp))[, 2])
+
+# map resistance
+plot(sub, col = hcl.colors(11, "YlOrBr", rev = TRUE))
+# add the least-cost path
+plot(st_geometry(lcp), add = TRUE, col = "blue", lwd = 2)
+# add the two refuges
+points(rbind(fpnwr, ossf), pch = 21, bg = "white")
+```
+
+**Reading the output.** The path is 50.7 km long, compared with a straight-line distance of 40.8 km. It crosses 100 cells. Of those, 46 have a resistance of 1, and only 6 have a resistance of 8 or 9.
+
+A single path is one cell wide. A corridor includes the routes that cost nearly as little. To map one, accumulate the cost outward from each refuge and add the two maps. Then keep the cells with the lowest values. Here we keep the lowest 10%.
+
+```{r corridor, exercise=TRUE, exercise.lines=28, fig.width=9, fig.height=4.5}
+# cumulative cost from FPNWR to every cell
+costF <- rast(gdistance::accCost(trSub, fpnwr))
+# cumulative cost from OSSF to every cell
+costO <- rast(gdistance::accCost(trSub, ossf))
+# add the two maps
+total <- costF + costO
+
+# find the value that marks the lowest 10% of cells
+cutoff <- global(total, quantile, probs = 0.1, na.rm = TRUE)[1, 1]
+# keep only the cells below that value
+corridor <- ifel(total < cutoff, 1, NA)
+
+# put three plots side by side
+par(mfrow = c(1, 3))
+# map the cost from FPNWR
+plot(costF, main = "Cost from FPNWR", legend = FALSE, mar = c(1, 1, 2, 1))
+# map the sum
+plot(total, main = "Sum of the two", legend = FALSE, mar = c(1, 1, 2, 1))
+# map resistance in gray
+plot(sub, col = gray.colors(11, 0.95, 0.5), main = "Corridor", legend = FALSE, mar = c(1, 1, 2, 1))
+# add the corridor in red
+plot(corridor, col = "firebrick", alpha = 0.7, add = TRUE, legend = FALSE)
+# add the least-cost path
+plot(st_geometry(lcp), add = TRUE, col = "blue", lwd = 2)
+
+# the smallest value of the sum
+global(total, "min", na.rm = TRUE)
+```
+
+**Reading the output.** The minimum of the sum is 85,584, which equals the least-cost distance between the refuges: every cell on the least-cost path has that total. The sum rises as a cell's best route between the refuges becomes more costly. The corridor contains 1,000 cells, or 250 km². It widens where several routes cost nearly the same, and it narrows where they converge. Try `probs = 0.02` and `probs = 0.25`. The cutoff is your decision, and the data do not set it.
+
+## Exercise 4 - Random walks and flow
+
+A least-cost path assumes that an animal knows the whole landscape and takes the single best route. Circuit theory makes the opposite assumption, and it is based on a random walk. A random walk is a path in which each step goes to a neighboring cell chosen by chance, with more conductive cells more likely, and the walker does not know where its destination is. We cover random walks in depth in the movement lecture on November 10.
+
+Circuit theory treats each cell as a node in an electrical circuit and each link as a resistor (McRae et al. 2008). Current flowing through the circuit behaves like a large number of random walkers, so a map of current shows where walkers are likely to pass. Two rules from circuits explain why this matters for connectivity:
+
+* **In series, resistances add.** A corridor of 20 cells, each with a resistance of 1, has a resistance of about 20.
+* **In parallel, conductances add.** Two identical routes side by side give the current twice the conductance, so they have half the resistance of one route.
+
+The **effective resistance** between two points combines every route in this way. A least-cost distance uses only the best route, so it cannot see a second route.
+
+McRae, B. H., B. G. Dickson, T. H. Keitt, and V. B. Shah. 2008. Using circuit theory to model connectivity in ecology, evolution, and conservation. *Ecology* 89:2712-2724.
+
+We can test this with the three landscapes from the lecture breakout. Each has the same two habitat patches and the same least-cost route. Landscape A has one narrow corridor, B has one wide corridor, and C has two narrow corridors. `gdistance::commuteDistance()` returns the expected time for a random walker to travel between two points and back. That time equals the effective resistance multiplied by the sum of all conductances, so we divide by that sum to get effective resistance.
+
+```{r redundancy, exercise=TRUE, exercise.lines=41, fig.width=9, fig.height=3.5}
+# build a landscape: resistance 100 everywhere, with corridors in the rows given
+makeLandscape <- function(corridorRows) {
+  # a grid with resistance 100 everywhere
+  m <- matrix(100, 21, 31)
+  m[6:16, 1:5] <- 1              # left habitat patch
+  m[6:16, 27:31] <- 1            # right habitat patch
+  m[corridorRows, ] <- 1         # corridors
+  # convert the grid to a raster
+  rast(m, extent = ext(0, 31, 0, 21))
+}
+# one narrow corridor (A), one wide corridor (B), and two narrow corridors (C)
+landscapes <- list(A = makeLandscape(8), B = makeLandscape(4:8), C = makeLandscape(c(8, 14)))
+
+# the two points to connect, one in each habitat patch
+pts <- rbind(c(2.5, 10.5), c(28.5, 10.5))
+
+# calculate least-cost distance and effective resistance for each landscape
+results <- sapply(landscapes, function(r) {
+  # build the network, with each cell linked to 4 neighbors
+  tr <- gdistance::transition(1 / raster::raster(r), transitionFunction = mean, directions = 4)
+  # least-cost distance between the points
+  leastCost <- as.numeric(gdistance::costDistance(tr, pts))
+  # commute distance between the points
+  commute <- as.numeric(gdistance::commuteDistance(tr, pts))
+  # return least-cost distance and effective resistance
+  c(leastCost = leastCost, resistance = commute / sum(gdistance::transitionMatrix(tr)))
+})
+# print the results
+round(results, 1)
+
+# draw the landscapes
+par(mfrow = c(1, 3))
+# repeat for each landscape
+for (n in names(landscapes)) {
+  # draw low-resistance cells in green and high-resistance cells in tan
+  plot(landscapes[[n]], col = c("#2d6a4f", "#ece7d5"), breaks = c(0, 50, 200), legend = FALSE,
+       axes = FALSE, main = paste("Landscape", n), mar = c(0.5, 0.5, 2, 0.5))
+  # add the two points
+  points(pts, pch = 21, bg = "white")
+}
+```
+
+**Reading the output.** The least-cost distance is 32 in all three landscapes, because each has a route of the same cost. The effective resistance is 19.6 in A, 6.5 in B, and 11.0 in C. C has about half the resistance of A (a ratio of 0.56), as the parallel rule predicts. The ratio is not exactly 0.5 because the walker must also cross the habitat patches, and those parts of the route remain in series. If one corridor in C were lost, C would become A: the least-cost distance would not change, but the resistance would almost double. This is what we mean by route redundancy.
+
+The panther refuges are a real landscape, so here we map flow. `gdistance::passage()` maps the probability that a walker going from one refuge to the other passes through each cell. Its `theta` argument sets where the model falls between the two assumptions. With `theta = 0` the walk is random, which is equivalent to circuit theory, and as `theta` increases the walk concentrates on the least-cost path (randomized shortest paths; Fig. 9.10 in the book).
+
+```{r theta-quiz}
+quiz(
+  question("Before you run the exercise: what will happen to the share of the landscape with a passage probability above 0.01 as `theta` increases?",
+    answer("It will increase, because the walkers will explore more of the landscape."),
+    answer("It will decrease, because the walkers will concentrate on low-cost routes.", correct = TRUE),
+    answer("It will not change, because the same two refuges are involved."),
+    allow_retry = TRUE,
+    correct = "Run the exercise to check the size of the change."))
+```
+
+```{r flow, exercise=TRUE, fig.width=9, fig.height=4.5}
+# the values of theta to compare
+thetas <- c(0, 0.00001, 0.001, 0.005)
+
+# put four plots in a row
+par(mfrow = c(1, 4))
+# repeat for each value of theta
+for (th in thetas) {
+  # map the probability that a walker passes through each cell
+  p <- rast(gdistance::passage(trSub, ossf, fpnwr, theta = th))
+  # print the share of cells with a probability above 0.01
+  cat("theta =", th, " share of cells above 0.01:", round(mean(values(p, na.rm = TRUE) > 0.01), 3), "\n")
+  # map the probability on a log scale
+  plot(log10(p + 1e-6), col = hcl.colors(50, "Inferno"), legend = FALSE, axes = FALSE,
+       main = paste("theta =", th), mar = c(0.5, 0.5, 2, 0.5))
+}
+```
+
+**Reading the output.** With `theta = 0`, 47% of the cells have a passage probability above 0.01. No route stands out, which means high route redundancy between these refuges. At `theta = 0.001` the share falls to 5%, and at `theta = 0.005` it falls to 2%, so the map approaches the corridor from Exercise 3. The colors are on a log scale.
+
+These calculations are fast because the raster is small (about 10,000 cells). On the full landscape the book reports about 400 seconds for `commuteDistance()`. For large rasters, researchers use Circuitscape or Omniscape, which are written in Julia.
+
+```{r flow-quiz}
+quiz(
+  question("Which question would lead you to a random-walk or circuit map and not a least-cost path?",
+    answer("Which single route is cheapest for a road crossing?"),
+    answer("If one route is lost, do alternative routes remain?", correct = TRUE),
+    answer("How far apart are the refuges in kilometers?"),
+    allow_retry = TRUE,
+    correct = "Right. Circuit theory counts all routes, so it shows redundancy and pinch points. A least-cost path shows one route."))
+```
+
+## Exercise 5 - A patch network for the snail kite
+
+Snail kites move among wetlands in central and south Florida. `nodes` holds the 29 wetlands, `kiteDist` holds the distances between them in km, and `kiteObs` holds the number of observed within-season movements between each pair (Reichert et al. 2016).
+
+Reichert, B. E., R. J. Fletcher Jr., C. E. Cattau, and W. M. Kitchens. 2016. Consistent scaling of population structure despite intraspecific variation in movement and connectivity. *Journal of Animal Ecology* 85:1563-1573.
+
+First we build a **potential** network: we link two wetlands if they are closer than the mean observed movement distance. Then we compute three metrics. Degree counts a node's links. Betweenness counts the shortest paths that pass through a node, which identifies stepping stones. Components are the groups of nodes that connect to each other.
+
+```{r kite, exercise=TRUE, exercise.lines=36, fig.height=6}
+# find the pairs of wetlands with observed movements
+moves <- which(kiteObs > 0, arr.ind = TRUE)
+moveDist <- rep(kiteDist[moves], kiteObs[moves])  # one distance per observed movement
+# mean movement distance
+meanDist <- mean(moveDist)
+# print it
+meanDist
+
+# link two wetlands (1) if they are closer than the threshold
+A <- (kiteDist < meanDist) * 1
+# do not link a wetland to itself
+diag(A) <- 0
+# build the network
+g <- graph_from_adjacency_matrix(A, mode = "undirected")
+
+# count the components
+components(g)$no
+# calculate degree and betweenness for each wetland
+deg <- degree(g); btw <- betweenness(g)
+# label them with the wetland names
+names(deg) <- names(btw) <- nodes$Name
+# print the five highest betweenness values
+sort(btw, decreasing = TRUE)[1:5]
+
+# component sizes after removing one wetland
+components(delete_vertices(g, which(nodes$Name == "IST")))$csize
+# do the same after removing OKEE
+components(delete_vertices(g, which(nodes$Name == "OKEE")))$csize
+
+# label only IST and OKEE
+labels <- ifelse(nodes$Name %in% c("IST", "OKEE"), nodes$Name, NA)
+# draw the network at the wetland coordinates, with node size set by betweenness
+plot(g, layout = kiteXY, vertex.label = labels, vertex.label.color = "black", vertex.label.font = 2,
+     vertex.label.dist = 2, vertex.color = "steelblue",
+     vertex.size = 4 + 15 * btw / max(btw), main = "Node size shows betweenness")
+```
+
+**Reading the output.** The mean movement distance is 72.3 km, the value in the book. At that threshold all 29 wetlands form a single component. IST and OKEE have the highest betweenness (180 and 121), even though each has only 6 links. Several other wetlands have 10-12 links but much lower betweenness, so a node can have many links and still not be a stepping stone. Removing IST splits the network into a northern group of 10 wetlands and a southern group of 18. Removing OKEE leaves it in one piece, because shortest paths pass through OKEE but other routes exist. High betweenness flags a node to examine, and removing it tests whether the network depends on it.
+
+The threshold is a statement about the organism. Change it and watch the network break apart.
+
+```{r kite-threshold, exercise=TRUE}
+# the dispersal thresholds to compare, in km
+thresholds <- c(20, 30, 40, 50, 72.3, 100)
+# count the components at each threshold
+nComp <- sapply(thresholds, function(th) {
+  # link wetlands closer than this threshold
+  A <- (kiteDist < th) * 1
+  # do not link a wetland to itself
+  diag(A) <- 0
+  # build the network and count its components
+  components(graph_from_adjacency_matrix(A, mode = "undirected"))$no
+})
+# print the results
+data.frame(thresholds, nComp)
+# plot the results
+plot(thresholds, nComp, type = "b", pch = 16, xlab = "Dispersal threshold (km)", ylab = "Number of components")
+```
+
+**Reading the output.** The network has 15 components at 20 km and 5 at 50 km, and it becomes one component somewhere between 50 and 72 km. A species that moves 30 km and a species that moves 75 km live in very different networks on the same map.
+
+Now compare the potential network with what kites did.
+
+```{r kite-predict-quiz}
+quiz(
+  question("Before you run the next exercise: are the wetlands with the highest betweenness in the potential network the wetlands that kites use most?",
+    answer("Yes, because stepping stones should carry the most movement."),
+    answer("No, because the potential network uses only distance, and other factors also determine where kites go.", correct = TRUE),
+    allow_retry = TRUE,
+    correct = "Run the exercise to see how weak the relationship is."))
+```
+
+```{r kite-observed, exercise=TRUE, exercise.lines=24, fig.height=5}
+# link wetlands closer than 72.3 km
+A <- (kiteDist < 72.3) * 1
+# do not link a wetland to itself
+diag(A) <- 0
+# build the network
+g <- graph_from_adjacency_matrix(A, mode = "undirected")
+# build the network of observed movements
+gObs <- graph_from_adjacency_matrix(kiteObs, mode = "directed", weighted = TRUE)
+
+obsMoves <- strength(gObs, mode = "all")   # movements into and out of each wetland
+# label them with the wetland names
+names(obsMoves) <- nodes$Name
+# print the five most-used wetlands
+sort(obsMoves, decreasing = TRUE)[1:5]
+
+# rank correlation of degree with observed movements
+cor(degree(g), obsMoves, method = "spearman")
+# rank correlation of betweenness with observed movements
+cor(betweenness(g), obsMoves, method = "spearman")
+
+# plot observed movements against betweenness
+plot(betweenness(g), obsMoves, pch = 16, xlab = "Betweenness (potential network)",
+     ylab = "Observed movements")
+```
+
+**Reading the output.** The wetlands kites moved through most are TOHO, KISS, ETOHO, OKEE, and WCA3A. The rank correlations between observed movements and both potential metrics are near zero (-0.11 for degree and -0.13 for betweenness). In this network, distance alone does not predict which wetlands kites use. Potential connectivity is a hypothesis about movement. Whenever you have observed movement or genetic data, compare the two.
+
+```{r kite-quiz}
+quiz(
+  question("Why might the potential network fail to predict observed movements here?",
+    answer("Because betweenness cannot be calculated on a binary network."),
+    answer("Because the network treats all wetlands as equal and uses only distance. It leaves out wetland quality, size, and the conditions that attract kites in a given year.", correct = TRUE),
+    answer("Because 72 km is the wrong unit."),
+    allow_retry = TRUE,
+    correct = "Right. Distance limits where kites can go, and other factors determine where they do go. Fletcher and Fortin organize these factors as spatial, environmental, and intrinsic constraints (Fig. 9.2)."))
+```
+
+## Exercise 6 - Dispersal kernels
+
+A dispersal kernel gives the probability of a movement as a function of its distance. Connectivity models and spread models both depend on a kernel, whether it is stated or not: the 72 km threshold in Exercise 5 replaced the kernel with a single cutoff.
+
+The tail of the kernel, which describes long movements, matters most for spread. A **fat-tailed** kernel gives rare long moves more probability than a thin-tailed kernel does, even if the two have a similar mean. Those rare moves start new populations far ahead of the front.
+
+We fit three kernels to the 389 observed kite movements. The exponential has one parameter, which is why it is common in metapopulation and connectivity work. The Weibull and lognormal each have two. `MASS::fitdistr()` fits each one by maximum likelihood, which we cover in the movement lecture.
+
+```{r kernels, exercise=TRUE, exercise.lines=34, fig.height=5}
+# one distance per observed movement, as in Exercise 5
+moves <- which(kiteObs > 0, arr.ind = TRUE)
+# one distance per observed movement
+moveDist <- rep(kiteDist[moves], kiteObs[moves])
+# summarize the distances
+summary(moveDist)
+
+# fit the two-parameter kernels; the exponential's rate is 1 / mean distance
+wei <- suppressWarnings(MASS::fitdistr(moveDist, "weibull"))$estimate
+# fit the lognormal
+lgn <- MASS::fitdistr(moveDist, "lognormal")$estimate
+# calculate the exponential rate
+rate <- 1 / mean(moveDist)
+
+# plot the observed distances with the three fitted kernels
+hist(moveDist, breaks = 25, freq = FALSE, col = "gray85", border = "white",
+     xlab = "Movement distance (km)", main = "Snail kite movements")
+# add the exponential kernel
+curve(dexp(x, rate), add = TRUE, col = "steelblue", lwd = 3)
+# add the Weibull kernel
+curve(dweibull(x, wei[1], wei[2]), add = TRUE, col = "seagreen", lwd = 3)
+# add the lognormal kernel
+curve(dlnorm(x, lgn[1], lgn[2]), add = TRUE, col = "firebrick", lwd = 3)
+# add a legend
+legend("topright", c("Exponential", "Weibull", "Lognormal"), col = c("steelblue", "seagreen", "firebrick"), lwd = 3, bty = "n")
+
+# percent of movements longer than each distance: observed, then predicted by each kernel
+d <- c(100, 200, 500)
+# combine the percentages into a table and print it
+round(100 * rbind(observed = sapply(d, function(x) mean(moveDist > x)),
+                  exponential = pexp(d, rate, lower.tail = FALSE),
+                  weibull = pweibull(d, wei[1], wei[2], lower.tail = FALSE),
+                  lognormal = plnorm(d, lgn[1], lgn[2], lower.tail = FALSE)), 2)
+```
+
+**Reading the output.** The median movement is 43 km and the mean is 72 km, because a few long movements pull the mean upward. The curves differ most at short distances, where the lognormal has a higher peak and the exponential is highest at zero. At 200 km they predict 4-7% of movements, close to the observed 7%. The longest observed movement is 266 km, so the data say nothing directly about 500 km. There the kernels disagree by a factor of nearly 90: 0.01% for the Weibull, 0.1% for the exponential, and 0.89% for the lognormal. The book compares kernels and finds that the Weibull fits these data best, but a good fit within the data does not settle what happens beyond them.
+
+```{r kernel-quiz}
+quiz(
+  question("Why is the tail of a kernel so hard to estimate, and why does that matter for predicting spread?",
+    answer("Long movements are rare, so there are few data on them, yet those movements start the new foci that speed up spread.", correct = TRUE),
+    answer("Long movements are common, so the data on them are too variable to fit."),
+    answer("The tail affects only the mean movement distance, so it has little effect on spread."),
+    allow_retry = TRUE,
+    correct = "Right. The part of the kernel that we measure least well has the largest effect on the rate of spread."))
+```
+
+## Exercise 7 - Simulating spread
+
+Spread is a process that occurs over time, so we simulate it. We wrote a function for this tutorial, `spreadSim()`, that simulates spread on a 2 km version of the panther landscape. The model works in these steps:
+
+1. One cell starts occupied.
+2. At each time step, every occupied cell can colonize its 8 neighbors. The probability of establishing comes from the matrix `hab`, which is 1 / resistance on land and 0 on open water.
+3. If `pLDD` is above 0, occupied cells also produce long-distance propagules. `pLDD` is the expected number per occupied cell per step. Each propagule travels in a random direction, a distance drawn from an exponential kernel with mean `meanLDD`, and establishes with the probability in `hab`.
+4. The function returns a matrix that gives the time step at which each cell was first occupied.
+
+This model has no population size within a cell, so it is a simplified version of the three-process models in lecture. It runs on the panther landscape, but it does not predict how panthers will spread.
+
+Here is the code. You do not need to change it. Two short helper functions follow it: `spreadRadius()` calculates a radius from the occupied area, and `spreadMap()` turns the output of `spreadSim()` into a raster.
+
+```{r spread-functions, context="setup", echo=TRUE}
+spreadSim <- function(hab, start, steps = 40, pLDD = 0, meanLDD = 25) {
+  # the number of rows and columns in the grid
+  nr <- nrow(hab)
+  nc <- ncol(hab)
+
+  # a matrix that holds the step each cell was first occupied (NA = empty)
+  first <- matrix(NA_integer_, nr, nc)
+
+  # occupy the starting cell at step 0
+  first[start[1], start[2]] <- 0L
+
+  # repeat for each time step
+  for (s in seq_len(steps)) {
+    # TRUE for cells occupied so far
+    occ <- !is.na(first)
+
+    # count each cell's occupied neighbors, using a copy of the grid with a border of zeros
+    pad <- matrix(0L, nr + 2, nc + 2)
+    pad[2:(nr + 1), 2:(nc + 1)] <- occ
+    nb <- pad[1:nr, 1:nc] + pad[1:nr, 2:(nc + 1)] + pad[1:nr, 3:(nc + 2)] +
+      pad[2:(nr + 1), 1:nc] + pad[2:(nr + 1), 3:(nc + 2)] +
+      pad[3:(nr + 2), 1:nc] + pad[3:(nr + 2), 2:(nc + 1)] + pad[3:(nr + 2), 3:(nc + 2)]
+
+    # local spread: each occupied neighbor gives an empty cell one chance to be colonized
+    new <- !occ & matrix(runif(nr * nc), nr, nc) < 1 - (1 - hab)^nb
+
+    # long-distance dispersal: draw the number of propagules this step
+    nLDD <- rpois(1, pLDD * sum(occ))
+    if (nLDD > 0) {
+      # choose an occupied source cell for each propagule
+      src <- which(occ, arr.ind = TRUE)
+      src <- src[sample(nrow(src), nLDD, replace = TRUE), , drop = FALSE]
+      # draw a distance from the kernel and a random direction
+      dist <- rexp(nLDD, 1 / meanLDD)
+      dir <- runif(nLDD, -pi, pi)
+      # calculate the landing row and column
+      r <- round(src[, 1] + dist * sin(dir))
+      c <- round(src[, 2] + dist * cos(dir))
+      # drop propagules that land off the grid
+      keep <- r >= 1 & r <= nr & c >= 1 & c <= nc
+      r <- r[keep]
+      c <- c[keep]
+      # decide which propagules establish, using hab
+      est <- runif(length(r)) < hab[cbind(r, c)]
+      # mark the empty cells where they establish as newly occupied
+      new[cbind(r[est], c[est])] <- !occ[cbind(r[est], c[est])]
+    }
+    # record this step for the newly occupied cells
+    first[new] <- s
+  }
+  # return the matrix of first-occupied steps
+  first
+}
+
+# radius of a circle with the occupied area, in cells, at each step
+spreadRadius <- function(first, steps = 40) {
+  sapply(0:steps, function(s) sqrt(sum(first <= s, na.rm = TRUE) / pi))
+}
+
+# put the output of spreadSim() into a raster for plotting
+spreadMap <- function(first) {
+  r <- cost2
+  values(r) <- as.vector(t(first))
+  r
+}
+```
+
+We compare three models, one of each from the lecture breakout. `habUniform` has the same mean as `hab` but no variation. Bright cells were occupied first, and dark cells were occupied last.
+
+```{r spread-maps, exercise=TRUE, exercise.lines=20, fig.width=9, fig.height=4.5}
+# make the simulations repeatable
+set.seed(11)
+# run the model with uniform habitat
+uniform <- spreadSim(habUniform, start)
+# run the model with varying habitat
+varying <- spreadSim(hab, start)
+# run the model with varying habitat and long-distance dispersal
+withLDD <- spreadSim(hab, start, pLDD = 0.02)
+
+# put three plots side by side
+par(mfrow = c(1, 3))
+# bright colors for early steps and dark colors for late steps
+pal <- hcl.colors(40, "Inferno", rev = TRUE)
+# map the uniform run
+plot(spreadMap(uniform), col = pal, range = c(0, 40), legend = FALSE, axes = FALSE, main = "Uniform habitat", mar = c(0.5, 0.5, 2, 0.5))
+# map the varying run
+plot(spreadMap(varying), col = pal, range = c(0, 40), legend = FALSE, axes = FALSE, main = "Habitat varies", mar = c(0.5, 0.5, 2, 0.5))
+# map the run with long-distance dispersal
+plot(spreadMap(withLDD), col = pal, range = c(0, 40), legend = FALSE, axes = FALSE, main = "Habitat varies + LDD", mar = c(0.5, 0.5, 2, 0.5))
+```
+
+**Reading the output.** The uniform model produces a nearly round front. With varying habitat, the front moves quickly through low-resistance cover and slowly through croplands, so the outline is irregular. Long-distance dispersal adds separate foci ahead of the front. The spotted lanternfly shows this pattern: its egg masses and adults hitchhike on vehicles and freight, which starts new infestations far ahead of the main front. Your map will change if you change the seed: try it.
+
+Skellam (1951) showed that with diffusion and growth, the square root of the occupied area increases linearly with time. `spreadRadius()` calculates that quantity. Each run is random, so we compare the means of 10 runs. Change `pLDD` from 0.02 to 0 and then to 0.05 and see how the red curve changes.
+
+```{r spread-curves, exercise=TRUE, exercise.lines=24, fig.height=5}
+# make the simulations repeatable
+set.seed(11)
+# long-distance propagules per occupied cell per step (change this)
+pLDD <- 0.02
+# the number of runs to average
+nRuns <- 10
+# mean radius at each step, uniform habitat
+radUniform <- rowMeans(sapply(1:nRuns, function(i) spreadRadius(spreadSim(habUniform, start))))
+# mean radius at each step, varying habitat
+radVarying <- rowMeans(sapply(1:nRuns, function(i) spreadRadius(spreadSim(hab, start))))
+# mean radius at each step, with long-distance dispersal
+radLDD <- rowMeans(sapply(1:nRuns, function(i) spreadRadius(spreadSim(hab, start, pLDD = pLDD))))
+
+# plot the long-distance dispersal curve
+plot(0:40, radLDD, type = "l", col = "firebrick", lwd = 3, ylim = c(0, max(radLDD)),
+     xlab = "Time step", ylab = "sqrt(occupied area / pi), in cells")
+# add the uniform curve
+lines(0:40, radUniform, col = "steelblue", lwd = 3)
+# add the varying curve
+lines(0:40, radVarying, col = "seagreen", lwd = 3)
+# add a legend
+legend("topleft", c("Habitat varies + LDD", "Uniform habitat", "Habitat varies"),
+       col = c("firebrick", "steelblue", "seagreen"), lwd = 3, bty = "n")
+```
+
+**Reading the output.** The uniform and varying curves are nearly straight lines after the first few steps and end close together, near 25 cells. Their mean suitability is the same, so habitat variation changes the shape of the invaded area more than the rate of spread in this model. The LDD curve starts on the same line and then bends upward as new foci grow and produce more propagules. It reaches about 40 cells, or about 80 km at 2 km per cell. Because the landscape is finite, this acceleration cannot continue indefinitely.
+
+```{r spread-quiz}
+quiz(
+  question("You observe an invasion, and the square root of occupied area rises faster over time. What does this suggest?",
+    answer("Local diffusion alone explains the spread."),
+    answer("Long-distance dispersal is probably starting new foci ahead of the main front.", correct = TRUE),
+    answer("The population has reached its carrying capacity."),
+    allow_retry = TRUE,
+    correct = "Right. A straight line is the prediction for diffusion and growth, so an upward curve points to something more, often long-distance dispersal. Better detection over time can produce the same pattern, so check the data as well."))
+```
+
+## Wrap-up
+
+You built a resistance surface and used it to identify routes with least-cost paths and corridors and to show redundancy with circuit theory. Patch networks summarize the structure of the whole system at a chosen dispersal threshold. Exercise 5 showed why these results need testing against observed movement. Exercise 6 showed that kernels agree within the data and disagree in the tail. Exercise 7 added time and showed why long-distance dispersal matters for the rate of spread.
+
+If connectivity is part of your final project:
+
+* Justify your resistance values, and test how much your results change when you change them.
+* `gdistance` handles small and medium rasters. For large rasters, consider Circuitscape or Omniscape. The R package `circuitscaper` wraps both, and it requires Julia.
+* Choose the model from your question, using the table on the "Choose the model" slide of the lecture.

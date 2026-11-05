@@ -56,6 +56,11 @@ install_if_missing("spatstat")
 install_if_missing(c("dismo", "predicts", "usdm", "tidyterra", "viridisLite",
                      "maxnet", "blockCV", "ecospat", "randomForest", "gbm"))
 
+# Connectivity and Spread tutorial
+# note: gdistance needs raster objects, so raster arrives as its dependency;
+# the course still uses terra for all raster work
+install_if_missing(c("gdistance", "igraph"))
+
 # course package - interactive tutorials for MEES 698C
 # (always run: install_github() skips the download itself when the installed
 # version already matches the one on GitHub, so this only acts when there are

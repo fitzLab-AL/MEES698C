@@ -53,20 +53,29 @@ By the end of this tutorial you should be able to evaluate a model on held-out d
 
 To evaluate a model on the test fold, we need its prediction at each test presence and each test background point. `extract()` reads all five maps at those points at once.
 
-```{r test-values, exercise=TRUE, fig.width=10, fig.height=4}
+```{r test-values, exercise=TRUE, exercise.lines=25, fig.width=10, fig.height=4}
+# read the five prediction maps
 preds <- rast("data/acaule_predictions.tif")
+# list the models
 names(preds)
 
+# read the predictions at the test presences
 testP <- extract(preds, test[test$pa == 1, c("x", "y")], ID = FALSE)
+# read the predictions at the test background points
 testBg <- extract(preds, test[test$pa == 0, c("x", "y")], ID = FALSE)
+# count the test presences
 nrow(testP)
+# count the test background points
 nrow(testBg)
 
 # mean prediction at the test presences and the test background points
 round(rbind(presences = colMeans(testP), background = colMeans(testBg)), 2)
 
+# put five plots in a row
 par(mfrow = c(1, 5))
+# repeat for each model
 for (m in names(preds)) {
+  # compare predictions at presences and background points
   boxplot(list(Pres = testP[[m]], Bg = testBg[[m]]), main = m, ylim = c(0, 1))
 }
 ```
@@ -78,7 +87,9 @@ for (m in names(preds)) {
 AUC is the probability that a randomly chosen presence gets a higher value than a randomly chosen absence. With background points in place of absences, it is the probability that a presence outranks a random background point. `pa_evaluate()` from the `predicts` package computes it from the predictions at the presences (`p`) and at the absences or background points (`a`).
 
 ```{r auc-glm, exercise=TRUE}
+# evaluate the GLM
 e <- pa_evaluate(p = testP$GLM, a = testBg$GLM)
+# print the statistics, including AUC
 e@stats
 ```
 
@@ -98,9 +109,12 @@ quiz(
 Now compute AUC for all five models. `sapply()` runs the function once for each model name and collects the results. Fill in the argument for the background points.
 
 ```{r auc-all, exercise=TRUE}
+# calculate AUC for each model
 auc <- sapply(names(preds), function(m) {
+  # evaluate this model and return its AUC
   pa_evaluate(p = testP[[m]], a = ____)@stats$auc
 })
+# print the AUC values
 round(auc, 3)
 ```
 
@@ -109,9 +123,12 @@ round(auc, 3)
 ```
 
 ```{r auc-all-solution}
+# calculate AUC for each model
 auc <- sapply(names(preds), function(m) {
+  # evaluate this model and return its AUC
   pa_evaluate(p = testP[[m]], a = testBg[[m]])@stats$auc
 })
+# print the AUC values
 round(auc, 3)
 ```
 
@@ -127,7 +144,9 @@ Hirzel, A. H., G. Le Lay, V. Helfer, C. Randin, and A. Guisan. 2006. Evaluating 
 
 ```{r boyce-glm, exercise=TRUE, fig.height=5}
 glmVals <- values(preds[["GLM"]], na.rm = TRUE)[, 1]   # every land cell
+# calculate the Boyce index and draw the P/E curve
 b <- ecospat.boyce(fit = glmVals, obs = testP$GLM)
+# print the index
 b$cor
 ```
 
@@ -136,13 +155,18 @@ b$cor
 Compute both metrics for all five models.
 
 ```{r boyce-all, exercise=TRUE}
+# calculate the Boyce index for each model
 boyce <- sapply(names(preds), function(m) {
+  # calculate the index for this model and return it
   ecospat.boyce(fit = values(preds[[m]], na.rm = TRUE)[, 1], obs = testP[[m]],
                 PEplot = FALSE)$cor
 })
+# calculate AUC for each model
 auc <- sapply(names(preds), function(m) {
+  # evaluate this model and return its AUC
   pa_evaluate(p = testP[[m]], a = testBg[[m]])@stats$auc
 })
+# print both metrics for each model
 round(rbind(AUC = auc, Boyce = boyce), 3)
 ```
 
@@ -173,35 +197,51 @@ quiz(
 
 The function `evalMx()` maps a fitted model, predicts it at the test points, and returns its AUC and Boyce index. This exercise takes about 15 seconds.
 
-```{r regmult-eval, exercise=TRUE, exercise.timelimit=120, fig.width=10, fig.height=4}
+```{r regmult-eval, exercise=TRUE, exercise.lines=46, exercise.timelimit=120, fig.width=10, fig.height=4}
+# fit MaxEnt with regmult = 1
 mx1 <- maxnet(p = train$pa, data = train[, vars])
+# fit MaxEnt with regmult = 5
 mx5 <- maxnet(p = train$pa, data = train[, vars], regmult = 5)
 
+# a function that returns the AUC and Boyce index of a MaxEnt model
 evalMx <- function(mod) {
+  # map the model
   map <- predict(bioVars, mod, fun = function(m, d) predict(m, d, type = "cloglog"),
                  na.rm = TRUE)
+  # predict at the test presences
   p <- predict(mod, test[test$pa == 1, vars], type = "cloglog")[, 1]
+  # predict at the test background points
   a <- predict(mod, test[test$pa == 0, vars], type = "cloglog")[, 1]
+  # return both metrics
   c(AUC = pa_evaluate(p = p, a = a)@stats$auc,
     Boyce = ecospat.boyce(fit = values(map, na.rm = TRUE)[, 1], obs = p,
                           PEplot = FALSE)$cor)
 }
 
+# compare the two models
 round(rbind(regmult1 = evalMx(mx1), regmult5 = evalMx(mx5)), 3)
 
 # response curves: vary one predictor, hold the others at their mean at the training presences
 typical <- colMeans(train[train$pa == 1, vars])
+# axis labels for the predictors to plot
 labs <- c(bio5 = "bio5: max temperature of warmest month (°C)",
           bio6 = "bio6: min temperature of coldest month (°C)",
           bio17 = "bio17: precipitation of driest quarter (mm)")
+# put three plots side by side
 par(mfrow = c(1, 3))
+# repeat for each predictor
 for (v in names(labs)) {
+  # make 100 rows that hold the mean of each predictor
   nd <- data.frame(t(typical))[rep(1, 100), ]
+  # vary this predictor across its range
   nd[[v]] <- seq(min(train[[v]]), max(train[[v]]), length.out = 100)
+  # plot the curve for regmult = 1
   plot(nd[[v]], predict(mx1, nd, type = "cloglog"), type = "l", lwd = 2, ylim = c(0, 1),
        xlab = labs[v], ylab = "Predicted value (cloglog)")
+  # add the curve for regmult = 5
   lines(nd[[v]], predict(mx5, nd, type = "cloglog"), lwd = 2, lty = 2)
 }
+# add a legend
 legend("topright", c("regmult = 1", "regmult = 5"), lty = c(1, 2), lwd = 2, bty = "n")
 ```
 
@@ -214,11 +254,14 @@ The curves show what changed. With `regmult = 1`, the bio5 curve rises to a peak
 To project a model, call `predict()` with the future rasters in place of the current ones. `predict()` matches raster layers to model variables by name, so the future layers need the same names as the training data.
 
 ```{r fut-load, exercise=TRUE}
+# read the future climate
 fut <- rast("data/andes_cmip6_2061-2080_5m.tif")
 names(fut)       # the names that cmip6_world() gives the layers
 names(bioVars)   # the names the models were fit with
 
+# build the GLM formula with a quadratic term for each predictor
 glmForm <- as.formula(paste("pa ~", paste0("poly(", vars, ", 2)", collapse = " + ")))
+# fit the GLM
 glmMod <- glm(glmForm, family = binomial, data = train)
 
 # tryCatch() returns the error message instead of stopping
@@ -230,23 +273,34 @@ tryCatch(predict(fut, glmMod, type = "response", na.rm = TRUE),
 
 Rename the future layers, then project the GLM and MaxEnt. The maps show the central Andes, where the species occurs.
 
-```{r fut-project, exercise=TRUE, exercise.setup="fut-load", fig.width=10, fig.height=8}
+```{r fut-project, exercise=TRUE, exercise.lines=30, exercise.setup="fut-load", fig.width=10, fig.height=8}
+# rename the layers to match the training data
 names(fut) <- ____
+# project the GLM to the future climate
 glmFut <- predict(fut, glmMod, type = "response", na.rm = TRUE)
 
+# fit MaxEnt
 mx <- maxnet(p = train$pa, data = train[, vars])
+# project MaxEnt to the future climate
 mxFut <- predict(fut, mx, fun = function(m, d) predict(m, d, type = "cloglog"),
                  na.rm = TRUE)
 
 # current, future, and change (future minus current; red = loss, blue = gain)
 rdbu <- hcl.colors(21, "RdBu")
+# put six plots in two rows
 par(mfrow = c(2, 3))
+# map the current GLM prediction
 plot(crop(preds[["GLM"]], andes), range = c(0, 1), main = "GLM current")
+# map the future GLM prediction
 plot(crop(glmFut, andes), range = c(0, 1), main = "GLM 2061-2080")
+# map the change in the GLM prediction
 plot(crop(glmFut - preds[["GLM"]], andes), range = c(-0.5, 0.5), col = rdbu,
      main = "GLM change")
+# map the current MaxEnt prediction
 plot(crop(preds[["MaxEnt"]], andes), range = c(0, 1), main = "MaxEnt current")
+# map the future MaxEnt prediction
 plot(crop(mxFut, andes), range = c(0, 1), main = "MaxEnt 2061-2080")
+# map the change in the MaxEnt prediction
 plot(crop(mxFut - preds[["MaxEnt"]], andes), range = c(-0.5, 0.5), col = rdbu,
      main = "MaxEnt change")
 ```
@@ -257,22 +311,33 @@ names(fut) <- vars
 ```
 
 ```{r fut-project-solution}
+# rename the layers to match the training data
 names(fut) <- vars
+# project the GLM to the future climate
 glmFut <- predict(fut, glmMod, type = "response", na.rm = TRUE)
 
+# fit MaxEnt
 mx <- maxnet(p = train$pa, data = train[, vars])
+# project MaxEnt to the future climate
 mxFut <- predict(fut, mx, fun = function(m, d) predict(m, d, type = "cloglog"),
                  na.rm = TRUE)
 
 # current, future, and change (future minus current; red = loss, blue = gain)
 rdbu <- hcl.colors(21, "RdBu")
+# put six plots in two rows
 par(mfrow = c(2, 3))
+# map the current GLM prediction
 plot(crop(preds[["GLM"]], andes), range = c(0, 1), main = "GLM current")
+# map the future GLM prediction
 plot(crop(glmFut, andes), range = c(0, 1), main = "GLM 2061-2080")
+# map the change in the GLM prediction
 plot(crop(glmFut - preds[["GLM"]], andes), range = c(-0.5, 0.5), col = rdbu,
      main = "GLM change")
+# map the current MaxEnt prediction
 plot(crop(preds[["MaxEnt"]], andes), range = c(0, 1), main = "MaxEnt current")
+# map the future MaxEnt prediction
 plot(crop(mxFut, andes), range = c(0, 1), main = "MaxEnt 2061-2080")
+# map the change in the MaxEnt prediction
 plot(crop(mxFut - preds[["MaxEnt"]], andes), range = c(-0.5, 0.5), col = rdbu,
      main = "MaxEnt change")
 ```
@@ -288,11 +353,16 @@ A model has no data from climates outside the range of its training data, so its
 `mess()` from `predicts` takes the future rasters and the training data. With `full = TRUE` it also returns the score for each variable.
 
 ```{r mess, exercise=TRUE, fig.height=5}
+# read the future climate
 fut <- rast("data/andes_cmip6_2061-2080_5m.tif")
+# rename the layers to match the training data
 names(fut) <- vars
+# calculate MESS, keeping the score for each variable
 messFut <- mess(fut, train[, vars], full = TRUE)
+# list the layers
 names(messFut)
 
+# map where MESS is below 0, which marks extrapolation
 plot(messFut[["mess"]] < 0, col = c("gray85", "darkorange"),
      main = "MESS < 0: outside the training range")
 ```
@@ -302,16 +372,20 @@ plot(messFut[["mess"]] < 0, col = c("gray85", "darkorange"),
 Which variable puts those cells outside the range? `which.min()` returns, for each cell, the layer with the lowest score.
 
 ```{r mess-vars, exercise=TRUE, exercise.setup="mess", fig.height=5}
+# keep the score of each variable
 scores <- messFut[[paste0(vars, "_mess")]]
 leastSimilar <- which.min(scores)       # 1 = bio5, 2 = bio6, ...
+# find the extrapolated cells
 extrap <- values(messFut[["mess"]] < 0)[, 1] == 1
 
 # percent of the extrapolated cells set by each variable
 tab <- table(vars[values(leastSimilar)[extrap, 1]])
+# print the percentages
 round(100 * tab / sum(tab))
 
 # training range and future range of bio5
 range(train$bio5)
+# check the range of bio5 in the future climate
 minmax(fut[["bio5"]])
 ```
 
@@ -329,8 +403,11 @@ quiz(
 How do the five models behave in those cells? Here is the random forest's projection, shown only where MESS is negative.
 
 ```{r mess-rf, exercise=TRUE, exercise.setup="mess", fig.height=5}
+# read the five models' future maps
 futPreds <- rast("data/acaule_future_predictions.tif")
+# keep the random forest map only where MESS is below 0
 rfExtrap <- mask(futPreds[["RandomForest"]], messFut[["mess"]] < 0, maskvalues = c(0, NA))
+# map the result
 plot(rfExtrap, range = c(0, 1), main = "Random forest, 2061-2080, where MESS < 0")
 
 # cells where MESS < 0 and the forest predicts more than 0.3
@@ -354,8 +431,11 @@ quiz(
 Projecting all five models takes about a minute, so their future maps are saved in `data/acaule_future_predictions.tif`. The change in suitability is the future map minus the current map.
 
 ```{r change-maps, exercise=TRUE, fig.width=12, fig.height=4}
+# read the five models' future maps
 futPreds <- rast("data/acaule_future_predictions.tif")
+# calculate the change for each model
 chg <- futPreds - preds
+# map the changes
 plot(crop(chg, andes), nc = 5, range = c(-1, 1), col = hcl.colors(21, "RdBu"),
      main = names(chg))
 ```
@@ -365,8 +445,11 @@ plot(crop(chg, andes), nc = 5, range = c(-1, 1), col = hcl.colors(21, "RdBu"),
 To compare the models without comparing their values, count how many of them predict a gain or a loss in each cell. Changes smaller than 0.1 are ignored, so a cell that goes from 0.01 to 0.02 does not count as a gain.
 
 ```{r agreement, exercise=TRUE, exercise.setup="change-maps", fig.width=9, fig.height=5}
+# count the models that gain more than 0.1 in each cell
 nGain <- sum(chg > 0.1)
+# count the models that lose more than 0.1 in each cell
 nLoss <- sum(chg < -0.1)
+# map the two counts
 plot(crop(c(nGain, nLoss), andes), col = c("gray90", hcl.colors(5, "viridis", rev = TRUE)),
      main = c("Models predicting a gain", "Models predicting a loss"))
 

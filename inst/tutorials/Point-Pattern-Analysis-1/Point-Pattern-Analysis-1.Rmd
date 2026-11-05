@@ -45,6 +45,7 @@ Let's make a histogram of a Poisson distribution with *λ* = 5.
 ```{r poisson-histogram, exercise=TRUE, exercise.eval = T}
 # Generate 1000 draws from a Poisson distribution with lambda = 5
 set.seed(123)
+# draw 1,000 counts from a Poisson distribution with a mean of 5
 poisson_data <- rpois(1000, lambda = 5)
 
 # check the first few values
@@ -66,6 +67,7 @@ Now that we have a basic understanding of the Poisson distribution, let's genera
 set.seed(698) 
 dims <- 100 # window size
 pts <- 500 # number of points
+# calculate the intensity (points per unit area) and print it
 (lambda <- pts/dims/dims)
 ```
 
@@ -89,6 +91,7 @@ csr <- rpoispp(lambda,
 
 # Let's look at the details of the csr object
 summary(csr)
+# print the observed intensity of the pattern
 summary(csr)$intensity
 
 # plot the csr point-pattern
@@ -125,19 +128,22 @@ plot(ipp, pch=20)
 
 Let's do some simple analyses - namely quadrat counts - and also different visualizations of the IPP.
 
-```{r ipp-point-pattern-plot, exercise=TRUE, exercise.eval = T, exercise.setup = "ipp-point-pattern"}
+```{r ipp-point-pattern-plot, exercise=TRUE, exercise.lines=17, exercise.eval = T, exercise.setup = "ipp-point-pattern"}
 # plot the quadrat count for IPP
 plot(ipp, pch=20)
+# add the count in each quadrat
 plot(quadratcount(ipp), add=T)
 
 # plot the density with contours of the IPP point pattern
 #par(mfrow=c(1,2))
 plot(density(ipp))
+# add contours of the estimated intensity
 contour(density(ipp), add=T)
 
 # plot the CSR pattern for comparison
 #par(mfrow=c(1,2))
 plot(density(csr))
+# add contours of the estimated intensity
 contour(density(csr), add=T)
 ```
 
@@ -156,6 +162,7 @@ quadrat.test(ipp, method="MonteCarlo", main="ipp")
 
 # plot the test graphics
 plot(quadrat.test(csr, method="MonteCarlo"), main="csr")
+# run the quadrat test by simulation and plot the result
 plot(quadrat.test(ipp, method="MonteCarlo"), main="ipp")
 ```
 
@@ -168,7 +175,10 @@ cdf.test(csr, # point pattern
 cdf.test(ipp, "x", test="ks") # significant
 cdf.test(ipp, "y", test="ks") # significant
 
+# test csr against CSR along the x coordinate
 plot(cdf.test(csr, "x"), main="K-S test, csr")
+# test ipp against CSR along the x coordinate
 plot(cdf.test(ipp, "x"), main="K-S test-x, ipp")
+# test ipp against CSR along the y coordinate
 plot(cdf.test(ipp, "y"), main="K-S test-y, ipp")
 ```

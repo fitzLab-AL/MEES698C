@@ -51,11 +51,14 @@ rastCent <- rast(nrows=100, ncols=100, xmin=0, xmax=100, ymin=0, ymax=100)
 
 # Generate x and y coordinates
 x <- xyFromCell(rastCent, 1:ncell(rastCent))[,1]
+# y coordinate of every cell
 y <- xyFromCell(rastCent, 1:ncell(rastCent))[,2]
 
 # Calculate distance from center
 center_x <- 50
+# y coordinate of the center
 center_y <- 50
+# distance from each cell to the center
 distance <- sqrt((x - center_x)^2 + (y - center_y)^2)
 
 # Normalize distance to 0-1 range
@@ -66,23 +69,31 @@ values(rastCent) <- distance_norm*10
 
 # Plot both rasters
 par(mfrow=c(1,2))
+# plot the linear trend
 plot(rastLin, main="Linear Trend")
+# plot the raster with high values in the center
 plot(rastCent, main="High Values in Center")
 ```
 
 Next, we draw random samples from both rasters, as if a field campaign had measured abundance at 100 locations.
 
-```{r raster-samples, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup="raster-setup", fig.align='center', fig.width=8}
+```{r raster-samples, exercise=TRUE, exercise.lines=18, exercise.eval = T, exercise.setup="raster-setup", fig.align='center', fig.width=8}
 # generate random sample points from the rasters
 set.seed(421)
+# sample 100 random cells and keep their coordinates
 sampleLin <- spatSample(rastLin, size=100, method="random", xy=TRUE)
+# do the same for the second raster
 sampleCent <- spatSample(rastCent, size=100, method="random", xy=TRUE)
 
 # Plot the rasters
 par(mfrow=c(1,2))
+# plot the linear trend
 plot(rastLin, main="Linear Trend")
+# add the sample points, sized by value
 points(sampleLin$x, sampleLin$y, pch=21, col="gray10", cex=sampleLin$lyr.1/3)
+# plot the raster with high values in the center
 plot(rastCent, main="High Values in Center")
+# add the sample points, sized by value
 points(sampleCent$x, sampleCent$y, pch=21, col="gray10", cex=sampleCent$lyr.1/3)
 ```
 
@@ -137,11 +148,17 @@ Now plot the correlograms beside the rasters that produced them.
 ```{r correlogram-plot, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup="correlogram-create", fig.align='center', fig.width=8, fig.height=8}
 # plot the correlograms
 par(mfrow=c(2,2))
+# plot the linear trend
 plot(rastLin, main="Linear Trend")
+# plot the raster with high values in the center
 plot(rastCent, main="High Values in Center")
+# plot the correlogram for the linear trend
 plot(correlLin, main="Correlogram for Linear Trend")
+# add a line at zero autocorrelation
 abline(h=0, col="red")
+# plot the correlogram for the high center
 plot(correlCent, main="Correlogram for High Center")
+# add a line at zero autocorrelation
 abline(h=0, col="red")
 ```
 
@@ -187,12 +204,19 @@ Use `quiet=TRUE` in both calls, as above. The `correlCent` call in the earlier c
 ```
 
 ```{r increment-exercise-solution}
+# correlogram with narrow distance classes
 correlSmall <- correlog(x=sampleCent$x, y=sampleCent$y, z=sampleCent$lyr.1, increment=2, quiet=TRUE)
+# correlogram with wide distance classes
 correlLarge <- correlog(x=sampleCent$x, y=sampleCent$y, z=sampleCent$lyr.1, increment=30, quiet=TRUE)
+# put two plots side by side
 par(mfrow=c(1,2))
+# plot the narrow classes
 plot(correlSmall, main="increment = 2")
+# add a line at zero autocorrelation
 abline(h=0, col="red")
+# plot the wide classes
 plot(correlLarge, main="increment = 30")
+# add a line at zero autocorrelation
 abline(h=0, col="red")
 ```
 
@@ -216,9 +240,13 @@ Correlograms assume the sampling locations are roughly evenly spaced. Random sam
 ```
 
 ```{r regular-exercise-solution}
+# sample 100 cells on a regular grid
 sampleReg <- spatSample(rastCent, size=100, method="regular", xy=TRUE)
+# calculate the correlogram for the regular sample
 correlReg <- correlog(x=sampleReg$x, y=sampleReg$y, z=sampleReg$lyr.1, increment=10, quiet=TRUE)
+# plot the correlogram
 plot(correlReg, main="Regular sample, increment = 10")
+# add a line at zero autocorrelation
 abline(h=0, col="red")
 ```
 
@@ -246,6 +274,7 @@ meuse.sf <- st_as_sf(meuse.all, coords = c("x", "y"))
 
 # plot the data using ggplot and scale size to zinc concentration
 ggplot() +
+  # add the sample points, sized by zinc
   geom_point(data = meuse.all, aes(x = x, y = y, size = zinc))
 ```
 
@@ -281,6 +310,7 @@ max(zincVgm$dist)
 
 # a shorter cutoff and narrower classes, for comparison
 zincVgmShort <- variogram(log(zinc) ~ 1, meuse.sf, cutoff=800, width=50)
+# plot this variogram
 plot(zincVgmShort, pch=20, col="blue", cex=2, main="cutoff = 800, width = 50")
 ```
 
@@ -330,8 +360,11 @@ Putting it together: for these data the nugget is about 0.12, the sill about 0.6
 ```
 
 ```{r exp-exercise-solution}
+# fit an exponential model to the variogram
 model.exp <- fit.variogram(zincVgm, model=vgm("Exp"))
+# print the fitted parameters
 model.exp
+# plot the variogram with the fitted model
 plot(zincVgm, model=model.exp)
 ```
 
@@ -379,13 +412,15 @@ model.best
 
 What if the mean is *not* constant across the area? The zinc concentrations are highest near the river and fall away from it, which is a large-scale trend, not spatial dependence in the sense the variogram is meant to capture. We can remove a linear trend by supplying the coordinates as predictors. The variogram is then computed on the residuals from that trend.
 
-```{r variogram-trend, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup="meuse-data", fig.align='center', fig.width=8}
+```{r variogram-trend, exercise=TRUE, exercise.lines=24, exercise.eval = T, exercise.setup="meuse-data", fig.align='center', fig.width=8}
 # extract the x and y coordinates
 xCoord <- data.frame(st_coordinates(meuse.sf))$X
+# get the y coordinates
 yCoord <- data.frame(st_coordinates(meuse.sf))$Y
 
 # add the coordinates as attributes to the data
 meuse.sf$xCoord <- xCoord
+# add them as a column
 meuse.sf$yCoord <- yCoord
 
 # fit a variogram model with a trend
@@ -437,17 +472,21 @@ Lag is one scale decision; grain is another. Grain is the resolution of the data
 
 We build the surface from two components. A **broad** component has a spherical variogram with a range of 30 units, and a **fine** component has a range of only 3 units. Their sum has structure at two scales, like a species whose abundance varies smoothly across its range and also patchily from site to site.
 
-```{r grain-setup, exercise=TRUE, exercise.lines = 25, exercise.eval = T, fig.align='center', fig.width=9}
+```{r grain-setup, exercise=TRUE, exercise.lines=33, exercise.eval = T, fig.align='center', fig.width=9}
 # a 100 x 100 grid of cell centers
 grd <- expand.grid(x=seq(0.5, 99.5, 1), y=seq(0.5, 99.5, 1))
 
 # two random fields with known variogram models: broad (range 30) and fine (range 3)
 set.seed(7)
+# define the broad-scale random field
 gBroad <- gstat(formula=z~1, locations=~x+y, dummy=TRUE, beta=5,
                 model=vgm(psill=8, model="Sph", range=30), nmax=20)
+# define the fine-scale random field
 gFine  <- gstat(formula=z~1, locations=~x+y, dummy=TRUE, beta=0,
                 model=vgm(psill=2, model="Sph", range=3), nmax=20)
+# simulate the broad-scale field on the grid
 broad <- predict(gBroad, newdata=grd, nsim=1)
+# simulate the fine-scale field on the grid
 fine  <- predict(gFine,  newdata=grd, nsim=1)
 
 # sum the two and convert to a raster with a grain of 1 unit
@@ -455,48 +494,69 @@ rastSim <- rast(data.frame(x=grd$x, y=grd$y, z=broad$sim1 + fine$sim1), type="xy
 
 # coarsen the grain by aggregating cells: 1 x 1 -> 2 x 2 -> 5 x 5
 rastSim2 <- aggregate(rastSim, fact=2, fun="mean")
+# aggregate to a grain of 5
 rastSim5 <- aggregate(rastSim, fact=5, fun="mean")
 
+# put three plots side by side
 par(mfrow=c(1,3))
+# plot grain 1
 plot(rastSim, main="grain = 1")
+# plot grain 2
 plot(rastSim2, main="grain = 2")
+# plot grain 5
 plot(rastSim5, main="grain = 5")
 ```
 
 Now draw one regular sample of 200 points and extract the value at those *same* points from each raster, so that the only thing that changes between the data sets is the grain. The sample spacing is about 7 units, so at grain 1 the fine component (range 3) is entirely below the sampling interval: the variogram cannot resolve it, and it shows up as nugget. We set `cutoff = 50` so that the variogram reaches its plateau (the true range is 30) without running into the far corners of the extent.
 
-```{r grain-variograms, exercise=TRUE, exercise.lines = 25, exercise.eval = T, exercise.setup="grain-setup", fig.align='center', fig.width=8}
+```{r grain-variograms, exercise=TRUE, exercise.lines=30, exercise.eval = T, exercise.setup="grain-setup", fig.align='center', fig.width=8}
 # one regular sample, used for all grains
 samplePts <- spatSample(rastSim, size=200, method="regular", as.points=TRUE)
 
 # extract values from each raster at the same points and convert to sf
 grain1 <- st_as_sf(samplePts)
+# read grain 2 values at the sample points
 grain2 <- st_as_sf(samplePts); grain2$z <- extract(rastSim2, samplePts)[,2]
+# read grain 5 values at the sample points
 grain5 <- st_as_sf(samplePts); grain5$z <- extract(rastSim5, samplePts)[,2]
 
 # empirical variograms and spherical fits
 vgmG1 <- variogram(z ~ 1, grain1, cutoff=50)
+# calculate the variogram for grain 2
 vgmG2 <- variogram(z ~ 1, grain2, cutoff=50)
+# calculate the variogram for grain 5
 vgmG5 <- variogram(z ~ 1, grain5, cutoff=50)
+# fit a spherical model at grain 1
 fitG1 <- fit.variogram(vgmG1, vgm("Sph"))
+# fit a spherical model at grain 2
 fitG2 <- fit.variogram(vgmG2, vgm("Sph"))
+# fit a spherical model at grain 5
 fitG5 <- fit.variogram(vgmG5, vgm("Sph"))
 
+# print the fitted parameters at grain 1
 fitG1
+# print the fitted parameters at grain 2
 fitG2
+# print the fitted parameters at grain 5
 fitG5
 ```
 
 Plotted side by side on the same y-axis, the drop in the nugget and the sill with coarsening grain is obvious.
 
-```{r grain-plots, exercise=TRUE, exercise.lines = 12, exercise.eval = T, exercise.setup="grain-variograms", fig.align='center', fig.width=9, fig.height=3.5}
+```{r grain-plots, exercise=TRUE, exercise.lines=15, exercise.eval = T, exercise.setup="grain-variograms", fig.align='center', fig.width=9, fig.height=3.5}
 # plot the three variograms with their fitted models on the same y-axis
 par(mfrow=c(1,3))
+# plot the variogram at grain 1
 plot(vgmG1$dist, vgmG1$gamma, xlim=c(0, 50), ylim=c(0, 12), main="grain = 1", xlab="distance", ylab="semivariance")
+# add the fitted model
 lines(variogramLine(fitG1, maxdist=50))
+# plot the variogram at grain 2
 plot(vgmG2$dist, vgmG2$gamma, xlim=c(0, 50), ylim=c(0, 12), main="grain = 2", xlab="distance", ylab="semivariance")
+# add the fitted model
 lines(variogramLine(fitG2, maxdist=50))
+# plot the variogram at grain 5
 plot(vgmG5$dist, vgmG5$gamma, xlim=c(0, 50), ylim=c(0, 12), main="grain = 5", xlab="distance", ylab="semivariance")
+# add the fitted model
 lines(variogramLine(fitG5, maxdist=50))
 ```
 
@@ -511,10 +571,15 @@ lines(variogramLine(fitG5, maxdist=50))
 ```
 
 ```{r grain-exercise-solution}
+# aggregate to a grain of 10
 rastSim10 <- aggregate(rastSim, fact=10, fun="mean")
+# read grain 10 values at the sample points
 grain10 <- st_as_sf(samplePts); grain10$z <- extract(rastSim10, samplePts)[,2]
+# calculate the variogram for grain 10
 vgmG10 <- variogram(z ~ 1, grain10, cutoff=50)
+# fit a spherical model at grain 10
 fitG10 <- fit.variogram(vgmG10, vgm("Sph"))
+# print the fitted parameters at grain 10
 fitG10
 ```
 
@@ -547,7 +612,8 @@ quiz(
 
 In addition to *explanation*, variograms serve *prediction*: the fitted model describes how similar nearby values are, and that is exactly what is needed to interpolate between observations. The method is called kriging. It estimates the value at an unobserved location as a weighted average of nearby observations, with weights taken from the variogram model. In this exercise we krige a simulated habitat variable.
 
-```{r kriging-setup, exercise=TRUE, exercise.lines = 15, exercise.eval = T, fig.align='center', fig.width=8}
+```{r kriging-setup, exercise=TRUE, exercise.lines=17, exercise.eval = T, fig.align='center', fig.width=8}
+# make the random sample repeatable
 set.seed(614623)
 
 # Generate some random points with a fake 'habitat' variable
@@ -561,6 +627,7 @@ head(habitatPts)
 
 # plot the points using ggplot and scale size to habitat value
 ggplot() +
+  # add the sample points, sized by habitat
   geom_point(data = habitatPts, aes(x = xCoord, y = yCoord, size = habitat))
 ```
 
@@ -583,7 +650,7 @@ habitat <- kriging(x=habitatPts$xCoord, y=habitatPts$yCoord, response=habitatPts
 
 The `habitat` object contains the interpolated surface in `habitat$map`. We would like it as a raster, which `terra::rasterize()` can produce.
 
-```{r kriging-rasterize, exercise=TRUE, exercise.lines = 15, exercise.eval = T, exercise.setup="kriging-habitat", fig.align='center', fig.width=8}
+```{r kriging-rasterize, exercise=TRUE, exercise.lines=18, exercise.eval = T, exercise.setup="kriging-habitat", fig.align='center', fig.width=8}
 # get the map data from the kriging object
 habitatMap <- habitat$map
 
@@ -641,6 +708,7 @@ plot(pointsVgm, pch=20, col="blue", cex=2, main ="From original points")
 
 #
 
+# plot the variogram from the sample points
 plot(sampleVgm, pch=20, col="blue", cex=2, main ="From random sample points")
 ```
 

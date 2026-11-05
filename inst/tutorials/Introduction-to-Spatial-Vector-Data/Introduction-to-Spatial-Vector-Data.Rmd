@@ -75,7 +75,9 @@ quiz(
 
 ```{r exercise1-solution}
 head(lonlat) # or lonlat[1:5,]
+# check the class of the object
 class(lonlat)
+# plot the object
 plot(lonlat)
 ```
  
@@ -131,7 +133,9 @@ Some things to note about `lonlat.sf`:
 
 ```{r exercise2-solution}
 head(lonlat.sf) # or lonlat.sf[1:5,]
+# check the class of the sf object
 class(lonlat.sf)
+# plot the sf object
 plot(lonlat.sf)
 ```
  
@@ -192,6 +196,7 @@ climate <- data.frame(temperature = rnorm(n=10, mean=25, sd=5), precip = runif(1
 
 # join the climate data to lonlat.sf
 climatePts <- lonlat.sf %>%
+  # add the columns of climate to the sf object
   dplyr::mutate(climate)
 
 # print the result
@@ -200,15 +205,19 @@ print(climatePts)
 
 Now, let's plot the `climatePts` object using `ggplot2`. We will use the `temperature` attribute to color the points and the `precip` attribute to size the points.
 
-```{r ggplot-of-climatePts, exercise=TRUE, exercise.eval = T, exercise.lines = 10, exercise.setup = "attribute-data"}
+```{r ggplot-of-climatePts, exercise=TRUE, exercise.eval = T, exercise.lines=14, exercise.setup = "attribute-data"}
 # ggplot2
 library(ggplot2)
 
 # plot the result - use geom_sf() since climatePts is an sf object
 ggplot(climatePts) +
+  # draw the points, with color set by temperature and size set by precipitation
   geom_sf(aes(color = temperature, size = precip)) +
+  # use the viridis color scale for temperature
   scale_color_viridis_c() +
+  # set the smallest and largest point sizes
   scale_size_continuous(range = c(1, 10)) +
+  # use a plain background
   theme_minimal()
 ```
 
@@ -223,6 +232,7 @@ Here, we create a polygon geometry using the `st_polygon` function. We then conv
 # Define coordinates for the vertices of a polygon
 # Note that the polygon must be closed by repeating the first point at the end
 x <- c(0, 2, 5, 8, 9, -5, -3, 0)
+# y coordinates of the same vertices
 y <- c(0, 3, 7, 8, 11, 3, 1, 0)
 
 # Combine the x and y coordinates into a matrix
@@ -265,8 +275,11 @@ print(nc)
 Let's plot `nc` and make a map of the `AREA` attribute.
 
 ```{r ggplot-of-nc, exercise=TRUE, exercise.eval = T, exercise.lines = 6, exercise.setup = "read-shapefile"}
+# start a plot of the nc counties
 ggplot(nc) +
+  # draw the counties, filled by AREA
   geom_sf(aes(fill = AREA)) +
+  # use a plain background
   theme_minimal()
 ```
 
@@ -275,6 +288,7 @@ Now let's extract a subset of the data based on the `AREA` attribute and save a 
 ```{r subset-nc, exercise=TRUE, exercise.eval = T, exercise.setup = "read-shapefile"}
 # extract the AREA column
 nc.area <- nc %>% 
+  # keep only the AREA column (sf also keeps the geometry)
   dplyr::select(AREA)
 
 # print the result
@@ -303,6 +317,7 @@ alternative, especially for web mapping, and keeps everything in a single plain-
 ```{r write-geojson, exercise=TRUE, exercise.eval = T, exercise.lines = 12, exercise.setup = "read-shapefile"}
 # same object, written to a different format - just change the extension
 gj <- file.path(tempdir(), "nc.geojson")
+# write nc to the file, replacing any existing file
 sf::st_write(nc, gj, delete_dsn = TRUE, quiet = TRUE)
 
 # read it back
@@ -325,7 +340,9 @@ done by geometry rather than by a shared ID column.
 ```{r spatial-join, exercise=TRUE, exercise.eval = T, exercise.lines = 25, exercise.setup = "read-shapefile"}
 # make 20 random points within the bounding box of nc
 set.seed(809)
+# get the bounding box of nc
 bb <- sf::st_bbox(nc)
+# draw 20 random coordinates inside the bounding box
 pts <- data.frame(lon = runif(20, bb["xmin"], bb["xmax"]),
                   lat = runif(20, bb["ymin"], bb["ymax"]))
 
@@ -343,6 +360,7 @@ sum(is.na(pts.joined$NAME))
 
 # plot: counties, with the points on top
 plot(sf::st_geometry(nc), border = "grey70")
+# add the points to the plot in red
 plot(sf::st_geometry(pts.sf), add = TRUE, pch = 19, col = "red")
 ```
 
@@ -362,14 +380,17 @@ cent <- sf::st_centroid(nc.proj[1:5, ])
 
 # pairwise distances among those 5 centroids - note the units attached to the result
 d <- sf::st_distance(cent)
+# print the distances
 d
 
 # distance from the first county centroid to every county, converted to km
 d1 <- sf::st_distance(cent[1, ], nc.proj)
+# print the five smallest distances, in km
 round(sort(as.numeric(d1))[1:5] / 1000, 1)
 
 # which other county is nearest to the first one?
 nearest <- sf::st_nearest_feature(cent[1, ], nc.proj[-1, ])
+# print the name of that county
 nc.proj[-1, ][nearest, ]$NAME
 ```
 
